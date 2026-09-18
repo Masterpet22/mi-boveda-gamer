@@ -93,16 +93,23 @@ export function GameDashboard(){
       if(!current){setGames([]);setGoals(defaultGoals);setSettings(defaultSettings);setLoading(false);return}
       setLoading(true);
       try{
-        const [snapshot,goalsSnapshot,settingsSnapshot,pubSnap]=await Promise.all([
-          getDocs(firestoreQuery(collection(store,"users",current.uid,"games"),orderBy("updatedAt","desc"))),
-          getDoc(doc(store,"users",current.uid,"settings","goals")),
-          getDoc(doc(store,"users",current.uid,"settings","preferences")),
-          getDoc(doc(store,"publicProfiles",current.uid)),
-        ]);
+        let snapshot;
+        try{
+          snapshot=await getDocs(firestoreQuery(collection(store,"users",current.uid,"games"),orderBy("updatedAt","desc")));
+        }catch(orderError){
+          console.warn("Retrying games fetch without orderBy:", orderError);
+          snapshot=await getDocs(collection(store,"users",current.uid,"games"));
+        }
         setGames(snapshot.docs.map(item=>{const data=item.data() as Partial<Omit<Game,"id"|"updatedAt">>&{updatedAt?:{toDate?:()=>Date}|string};const updated=data.updatedAt;return {...blank,...data,id:item.id,updatedAt:typeof updated==="string"?updated:updated?.toDate?.().toISOString()??new Date().toISOString()} as Game}));
-        if(goalsSnapshot.exists())setGoals({...defaultGoals,...goalsSnapshot.data()} as Goals);
-        if(settingsSnapshot.exists()){const preferences={...defaultSettings,...settingsSnapshot.data()} as AppSettings;setSettings(preferences);setViewMode(preferences.defaultView);setSort(preferences.defaultSort)}
-        if(pubSnap.exists()){
+
+        const [goalsSnapshot,settingsSnapshot,pubSnap]=await Promise.all([
+          getDoc(doc(store,"users",current.uid,"settings","goals")).catch(()=>null),
+          getDoc(doc(store,"users",current.uid,"settings","preferences")).catch(()=>null),
+          getDoc(doc(store,"publicProfiles",current.uid)).catch(()=>null),
+        ]);
+        if(goalsSnapshot?.exists())setGoals({...defaultGoals,...goalsSnapshot.data()} as Goals);
+        if(settingsSnapshot?.exists()){const preferences={...defaultSettings,...settingsSnapshot.data()} as AppSettings;setSettings(preferences);setViewMode(preferences.defaultView);setSort(preferences.defaultSort)}
+        if(pubSnap?.exists()){
           const pubData=pubSnap.data() as PublicProfileData;
           setPublicProfileSettings({
             isPublic:pubData.isPublic??false,
@@ -116,7 +123,7 @@ export function GameDashboard(){
         }else{
           setPublicProfileSettings({...defaultProfileSettings,handle:current.displayName||"Gamer"});
         }
-      }catch(error){console.error(error);toast.error("No pudimos cargar tu biblioteca.")}finally{setLoading(false)}
+      }catch(error){console.error("Error loading library:", error);toast.error("No pudimos cargar tu biblioteca.")}finally{setLoading(false)}
     });
     return()=>{window.clearTimeout(fallback);unsubscribe()}
   },[]);
