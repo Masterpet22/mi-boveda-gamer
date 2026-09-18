@@ -80,6 +80,9 @@ export function sanitizeGamesForPublic(
 
   // 3. Sanitize individual fields based on privacy toggles
   const sanitizedGames: PublicGame[] = list.map(g => {
+    const rawCover = typeof g.coverUrl === "string" ? g.coverUrl.trim() : "";
+    const safeCoverUrl = rawCover.startsWith("data:") || rawCover.length > 2048 ? "" : rawCover;
+
     return {
       id: g.id,
       title: g.title,
@@ -92,7 +95,7 @@ export function sanitizeGamesForPublic(
       series: g.series,
       nextGoal: g.nextGoal,
       notes: settings.hideNotes ? "" : g.notes,
-      coverUrl: g.coverUrl,
+      coverUrl: safeCoverUrl,
       genre: g.genre,
       developer: g.developer,
       releaseYear: g.releaseYear,
@@ -141,6 +144,38 @@ export async function savePublicProfileToFirestore(
 ): Promise<PublicProfileData> {
   const { sanitizedGames, stats } = sanitizeGamesForPublic(rawGames, settings);
 
+  let finalGames = sanitizedGames;
+
+  // Protect Firestore against 1 MiB (1,048,576 bytes) hard document limit
+  const estimateSize = (games: PublicGame[]) => {
+    return new TextEncoder().encode(
+      JSON.stringify({
+        userId,
+        handle: settings.handle,
+        bio: settings.bio,
+        isPublic: settings.isPublic,
+        settings,
+        stats,
+        games,
+      })
+    ).length;
+  };
+
+  if (estimateSize(finalGames) > 850000) {
+    // 1st mitigation: trim descriptions and remove notes/sessions
+    finalGames = finalGames.map(g => ({
+      ...g,
+      description: g.description ? g.description.slice(0, 180) : "",
+      notes: "",
+      sessions: [],
+    }));
+  }
+
+  // 2nd mitigation: if still excessively large, cap games to fit safely under 900KB
+  while (finalGames.length > 50 && estimateSize(finalGames) > 900000) {
+    finalGames = finalGames.slice(0, Math.floor(finalGames.length * 0.85));
+  }
+
   const payload: PublicProfileData = {
     userId,
     handle: settings.handle.trim() || "Gamer",
@@ -154,7 +189,7 @@ export async function savePublicProfileToFirestore(
       hideWishlist: settings.hideWishlist,
     },
     stats,
-    games: sanitizedGames,
+    games: finalGames,
   };
 
   const ref = doc(db, "publicProfiles", userId);
