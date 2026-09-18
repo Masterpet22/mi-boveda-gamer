@@ -1,302 +1,1466 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { browserLocalPersistence, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from "firebase/auth";
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, orderBy, query as firestoreQuery, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
-import { Archive, Award, BarChart3, Bell, Brain, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, Compass, Dices, Download, Eye, FileJson, Gamepad2, Globe, Heart, ImageIcon, Info, Library, ListFilter, Lock, LogIn, LogOut, MoreHorizontal, Pencil, Play, Plus, Search, Settings2, Share2, SlidersHorizontal, Square, Star, Target, Trash2, Trophy, Upload, Zap, type LucideIcon } from "lucide-react";
+import {
+  browserLocalPersistence,
+  onAuthStateChanged,
+  setPersistence,
+  signInWithPopup,
+  signOut,
+  type User,
+} from "firebase/auth";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query as firestoreQuery,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
+import {
+  BarChart3,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Compass,
+  Dices,
+  Download,
+  Eye,
+  FileJson,
+  Gamepad2,
+  Globe,
+  Library,
+  ListFilter,
+  LogOut,
+  Plus,
+  Search,
+  Settings2,
+  Share2,
+  SlidersHorizontal,
+  Target,
+  Trophy,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { auth, db, googleProvider, isFirebaseConfigured } from "./firebase";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
+
 import { ShareDialog } from "@/components/share-dialog";
 import { ProfilesDialog } from "@/components/profiles-dialog";
 import { PublicProfileView } from "@/components/public-profile-view";
-import { defaultProfileSettings, savePublicProfileToFirestore, type PublicProfileData, type PublicProfileSettings } from "@/lib/share";
+import { CatalogDialog } from "@/components/catalog-dialog";
+import { GameDialog } from "@/components/game-dialog";
+import { GameDetails } from "@/components/game-details";
+import { SettingsDialog } from "@/components/settings-dialog";
+import { GoalsDialog } from "@/components/goals-dialog";
+import { StatsDialog } from "@/components/stats-dialog";
+import { RandomPicker, FilterSelect } from "@/components/random-picker";
+import {
+  AlertsPanel,
+  Empty,
+  GameCollectionView,
+  ViewSwitcher,
+} from "@/components/game-collection-view";
+import { SetupNotice, SignIn } from "@/components/sign-in";
 
-type Session = { id:string; date:string; hours:number; note:string };
-type Goals = { yearlyFinished:number; backlogLimit:number; monthlyHours:number; activeLimit:number };
-type InstallPromptEvent = Event & { prompt:()=>Promise<void>; userChoice:Promise<{outcome:string}> };
-type Game = { id:string; title:string; platform:string; format:string; status:string; progress:number; hours:number; estimatedHours:number; difficulty:string; priority:string; series:string; lists:string[]; nextGoal:string; notes:string; coverUrl:string; genre:string; developer:string; releaseYear:number; description:string; rating:number; startedAt:string; finishedAt:string; sessions:Session[]; source:string; sourceId:string; updatedAt:string; isPrivate?:boolean };
-type Draft = Omit<Game, "id" | "updatedAt">;
-type ViewMode = "cards" | "list" | "covers" | "series";
-type AppSettings = { defaultView:ViewMode; density:"comfortable"|"compact"; coverSize:"small"|"medium"|"large"; defaultStatus:string; defaultPlatform:string; defaultFormat:string; defaultSort:string; hideAbandoned:boolean; hidePending:boolean; confirmDelete:boolean; metadataLanguage:"es"|"en"; fallbackPlatform:string; preserveManualData:boolean; quickSessionMinutes:number; quickProgress:number; autoFinishAt100:boolean; inactivityDays:number };
-type WikidataResult = { id:string; label:string; description?:string };
-type WikidataClaim = { mainsnak?:{ datavalue?:{ value?:unknown } } };
-const platforms = ["3DS", "Series S", "PS2", "GameCube", "GBA", "Switch", "PC", "Otra"];
-const statuses = ["Jugando", "Backlog", "Pausado", "Terminado", "Completado", "Abandonado", "Pendiente de compra"];
-const customLists = ["Favoritos", "Próximos a jugar", "Pendientes de comprar", "Cooperativos", "Completados al 100 %"];
-const defaultGoals:Goals={yearlyFinished:12,backlogLimit:20,monthlyHours:20,activeLimit:5};
-const defaultSettings:AppSettings={defaultView:"cards",density:"comfortable",coverSize:"medium",defaultStatus:"Backlog",defaultPlatform:"Otra",defaultFormat:"Digital",defaultSort:"updated",hideAbandoned:false,hidePending:false,confirmDelete:true,metadataLanguage:"es",fallbackPlatform:"Otra",preserveManualData:true,quickSessionMinutes:30,quickProgress:10,autoFinishAt100:true,inactivityDays:30};
-const blank: Draft = { title:"", platform:"Otra", format:"Digital", status:"Backlog", progress:0, hours:0, estimatedHours:0, difficulty:"Sin indicar", priority:"Normal", series:"", lists:[], nextGoal:"", notes:"", coverUrl:"", genre:"", developer:"", releaseYear:0, description:"", rating:0, startedAt:"", finishedAt:"", sessions:[], source:"Manual", sourceId:"", isPrivate:false };
-const statusStyle: Record<string,string> = { Jugando:"bg-cyan-400/10 text-cyan-300 border-cyan-400/20", Backlog:"bg-violet-400/10 text-violet-300 border-violet-400/20", Pausado:"bg-amber-400/10 text-amber-300 border-amber-400/20", Terminado:"bg-emerald-400/10 text-emerald-300 border-emerald-400/20", Completado:"bg-lime-400/10 text-lime-300 border-lime-400/20", Abandonado:"bg-slate-400/10 text-slate-300 border-slate-400/20", "Pendiente de compra":"bg-fuchsia-400/10 text-fuchsia-300 border-fuchsia-400/20" };
-const color: Record<string,string> = { "3DS":"from-red-500 to-orange-400", "Series S":"from-emerald-500 to-green-300", PS2:"from-indigo-500 to-blue-400", GameCube:"from-violet-600 to-fuchsia-400", GBA:"from-sky-500 to-cyan-300", Switch:"from-rose-500 to-red-300", PC:"from-slate-500 to-slate-300", Otra:"from-amber-500 to-yellow-300" };
-const normalizeTitle=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+import type {
+  AppSettings,
+  Draft,
+  Game,
+  Goals,
+  InstallPromptEvent,
+  Session,
+  ViewMode,
+} from "@/lib/game-types";
+import {
+  blank,
+  color,
+  customLists,
+  defaultGoals,
+  defaultSettings,
+  normalizeTitle,
+  platforms,
+  statuses,
+} from "@/lib/game-types";
+import {
+  defaultProfileSettings,
+  savePublicProfileToFirestore,
+  type PublicProfileData,
+  type PublicProfileSettings,
+} from "@/lib/share";
 
-async function searchWikidataEntities(title:string,language="es",limit=10):Promise<WikidataResult[]>{const params=new URLSearchParams({action:"wbsearchentities",search:title,language,uselang:"es",type:"item",limit:String(Math.min(50,Math.max(10,limit))),format:"json",origin:"*"});const response=await fetch(`https://www.wikidata.org/w/api.php?${params}`);if(!response.ok)throw new Error("Wikidata search failed");const data=await response.json() as {search?:WikidataResult[]};return data.search??[]}
-async function searchWikidataGames(title:string,limit=6):Promise<WikidataResult[]>{const results=await searchWikidataEntities(title,"es",limit);const looksLikeGame=(item:WikidataResult)=>/videojuego|video game|juego electrónico|jeu vidéo/i.test(item.description??"");return [...results.filter(looksLikeGame),...results.filter(item=>!looksLikeGame(item))].slice(0,limit)}
-async function getWikidataSeriesGames(seriesId:string):Promise<WikidataResult[]>{if(!/^Q\d+$/.test(seriesId))return [];const sparql=`SELECT DISTINCT ?game WHERE { ?game wdt:P179+ wd:${seriesId}; wdt:P31/wdt:P279* wd:Q7889. } LIMIT 50`,params=new URLSearchParams({query:sparql,format:"json",origin:"*"}),response=await fetch(`https://query.wikidata.org/sparql?${params}`);if(!response.ok)throw new Error("Wikidata series failed");const data=await response.json() as {results?:{bindings?:Array<{game?:{value?:string}}>}},ids=[...new Set((data.results?.bindings??[]).map(item=>item.game?.value?.split("/").pop()??"").filter(id=>/^Q\d+$/.test(id)))];if(!ids.length)return [];const entityParams=new URLSearchParams({action:"wbgetentities",ids:ids.join("|"),props:"labels|descriptions",languages:"es|en",languagefallback:"1",format:"json",origin:"*"}),entityResponse=await fetch(`https://www.wikidata.org/w/api.php?${entityParams}`);if(!entityResponse.ok)throw new Error("Wikidata labels failed");const entities=await entityResponse.json() as {entities?:Record<string,{labels?:Record<string,{value:string}>;descriptions?:Record<string,{value:string}>}>};return ids.map(id=>({id,label:entities.entities?.[id]?.labels?.es?.value??entities.entities?.[id]?.labels?.en?.value??id,description:entities.entities?.[id]?.descriptions?.es?.value??entities.entities?.[id]?.descriptions?.en?.value??"Videojuego de la saga"}))}
-async function searchWikidataCatalog(title:string):Promise<WikidataResult[]>{const [spanish,english]=await Promise.all([searchWikidataEntities(title,"es",40),searchWikidataEntities(title,"en",40)]),combined=[...new Map([...spanish,...english].map(item=>[item.id,item])).values()],seriesPattern=/serie de videojuegos|franquicia de videojuegos|video game series|video game franchise/i,gamePattern=/videojuego|video game|juego electrónico|jeu vidéo/i,series=combined.filter(item=>seriesPattern.test(item.description??"")).slice(0,2),direct=combined.filter(item=>gamePattern.test(item.description??"")&&!seriesPattern.test(item.description??"")),sagaGames:WikidataResult[]=[];for(const item of series){try{sagaGames.push(...await getWikidataSeriesGames(item.id))}catch(error){console.warn("Wikidata series",error)}}return [...new Map([...sagaGames,...direct].map(item=>[item.id,item])).values()].slice(0,50)}
-function claimEntityIds(claims:Record<string,WikidataClaim[]>,property:string){return (claims[property]??[]).map(claim=>(claim.mainsnak?.datavalue?.value as {id?:string}|undefined)?.id).filter((id):id is string=>!!id)}
-function claimText(claims:Record<string,WikidataClaim[]>,property:string){return String(claims[property]?.[0]?.mainsnak?.datavalue?.value??"")}
-function claimTime(claims:Record<string,WikidataClaim[]>,property:string){const value=claims[property]?.[0]?.mainsnak?.datavalue?.value;return typeof value==="object"&&value!==null&&"time" in value?String((value as {time?:unknown}).time??""):""}
-function platformFromLabels(labels:string[]){const text=labels.join(" ").toLowerCase();if(text.includes("nintendo switch"))return "Switch";if(text.includes("xbox series"))return "Series S";if(text.includes("playstation 2"))return "PS2";if(text.includes("nintendo 3ds"))return "3DS";if(text.includes("gamecube"))return "GameCube";if(text.includes("game boy advance"))return "GBA";if(/windows|linux|macos|mac os|personal computer/.test(text))return "PC";return "Otra"}
-async function getWikidataGame(result:WikidataResult,settings:AppSettings=defaultSettings):Promise<Partial<Draft>>{
-  const preferred=settings.metadataLanguage,fallback=preferred==="es"?"en":"es",languages=`${preferred}|${fallback}`,params=new URLSearchParams({action:"wbgetentities",ids:result.id,props:"claims|labels|sitelinks|descriptions",sitefilter:"eswiki|enwiki",languages,languagefallback:"1",format:"json",origin:"*"});
-  const response=await fetch(`https://www.wikidata.org/w/api.php?${params}`);
-  if(!response.ok)throw new Error("Wikidata entity failed");
-  const data=await response.json() as {entities?:Record<string,{labels?:Record<string,{value:string}>;descriptions?:Record<string,{value:string}>;claims?:Record<string,WikidataClaim[]>;sitelinks?:Record<string,{title:string}>}>};
-  const entity=data.entities?.[result.id],claims=entity?.claims??{};
-  let referenceClaims:Record<string,WikidataClaim[]>={};
-  const referenceId=claimEntityIds(claims,"P144")[0];
-  if(referenceId){const referenceParams=new URLSearchParams({action:"wbgetentities",ids:referenceId,props:"claims",format:"json",origin:"*"});const referenceResponse=await fetch(`https://www.wikidata.org/w/api.php?${referenceParams}`);if(referenceResponse.ok){const referenceData=await referenceResponse.json() as {entities?:Record<string,{claims?:Record<string,WikidataClaim[]>}>};referenceClaims=referenceData.entities?.[referenceId]?.claims??{}}}
-  const relatedIds=[...new Set([...claimEntityIds(claims,"P136"),...claimEntityIds(claims,"P178"),...claimEntityIds(claims,"P179"),...claimEntityIds(claims,"P400"),...claimEntityIds(referenceClaims,"P136"),...claimEntityIds(referenceClaims,"P179")])];
-  const labels:Record<string,string>={};
-  if(relatedIds.length){const labelParams=new URLSearchParams({action:"wbgetentities",ids:relatedIds.join("|"),props:"labels",languages,languagefallback:"1",format:"json",origin:"*"});const labelResponse=await fetch(`https://www.wikidata.org/w/api.php?${labelParams}`);if(labelResponse.ok){const labelData=await labelResponse.json() as {entities?:Record<string,{labels?:Record<string,{value:string}>}>};for(const [id,item] of Object.entries(labelData.entities??{}))labels[id]=item.labels?.[preferred]?.value??item.labels?.[fallback]?.value??""}}
-  const names=(property:string,source:Record<string,WikidataClaim[]>=claims)=>claimEntityIds(source,property).map(id=>labels[id]).filter(Boolean);
-  const image=claimText(claims,"P18"),release=claimTime(claims,"P577");
-  let coverUrl=image?`https://commons.wikimedia.org/wiki/Special:Redirect/file/${encodeURIComponent(image)}?width=900`:"";
-  if(!coverUrl){const wiki=entity?.sitelinks?.eswiki?"es":entity?.sitelinks?.enwiki?"en":"";const title=entity?.sitelinks?.[`${wiki}wiki`]?.title;if(wiki&&title){const imageParams=new URLSearchParams({action:"query",prop:"pageimages",titles:title,pithumbsize:"900",format:"json",origin:"*"});const imageResponse=await fetch(`https://${wiki}.wikipedia.org/w/api.php?${imageParams}`);if(imageResponse.ok){const imageData=await imageResponse.json() as {query?:{pages?:Record<string,{thumbnail?:{source?:string}}>}};coverUrl=Object.values(imageData.query?.pages??{})[0]?.thumbnail?.source??""}}}
-  const genreNames=names("P136").length?names("P136"):names("P136",referenceClaims),seriesNames=names("P179").length?names("P179"):names("P179",referenceClaims);
-  const description=entity?.descriptions?.[preferred]?.value??entity?.descriptions?.[fallback]?.value??result.description??"",descriptionYear=description.match(/\b(19|20)\d{2}\b/)?.[0],detectedPlatform=platformFromLabels(names("P400"));
-  return {title:entity?.labels?.[preferred]?.value??entity?.labels?.[fallback]?.value??result.label,coverUrl,genre:genreNames.slice(0,3).join(", "),developer:names("P178").slice(0,3).join(", "),series:seriesNames[0]??"",platform:detectedPlatform==="Otra"?settings.fallbackPlatform:detectedPlatform,releaseYear:/^[+-]\d{4}/.test(release)?Number(release.slice(1,5)):Number(descriptionYear??0),description,source:"Wikidata",sourceId:result.id}
-}
-
-export function GameDashboard(){
-  const [games,setGames]=useState<Game[]>([]), [goals,setGoals]=useState<Goals>(defaultGoals), [settings,setSettings]=useState<AppSettings>(defaultSettings), [loading,setLoading]=useState(true), [user,setUser]=useState<User|null>(null), [authReady,setAuthReady]=useState(false), [signingIn,setSigningIn]=useState(false), [installPrompt,setInstallPrompt]=useState<InstallPromptEvent|null>(null), [query,setQuery]=useState(""), [tab,setTab]=useState("Todos"), [platform,setPlatform]=useState("Todas"), [genre,setGenre]=useState("Todos"), [series,setSeries]=useState("Todas"), [priority,setPriority]=useState("Todas"), [year,setYear]=useState("Todos"), [list,setList]=useState("Todas"), [duration,setDuration]=useState("Todas"), [difficulty,setDifficulty]=useState("Todas"), [sort,setSort]=useState("updated"), [viewMode,setViewMode]=useState<ViewMode>("cards"), [filtersOpen,setFiltersOpen]=useState(false), [dialog,setDialog]=useState(false), [catalogDialog,setCatalogDialog]=useState(false), [settingsDialog,setSettingsDialog]=useState(false), [statsDialog,setStatsDialog]=useState(false), [randomDialog,setRandomDialog]=useState(false), [goalsDialog,setGoalsDialog]=useState(false), [editing,setEditing]=useState<Game|null>(null), [selectedGame,setSelectedGame]=useState<Game|null>(null), [draft,setDraft]=useState<Draft>(blank), [saving,setSaving]=useState(false), [importing,setImporting]=useState(false);
-  const [shareOpen,setShareOpen]=useState(false), [profilesDialogOpen,setProfilesDialogOpen]=useState(false), [publicProfileSettings,setPublicProfileSettings]=useState<PublicProfileSettings>(defaultProfileSettings), [publicViewUid,setPublicViewUid]=useState<string|null>(()=>{
-    if(typeof window!=="undefined"){
-      const params=new URLSearchParams(window.location.search);
-      return params.get("share")||params.get("user")||null;
+export function GameDashboard() {
+  const [games, setGames] = useState<Game[]>([]);
+  const [goals, setGoals] = useState<Goals>(defaultGoals);
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState("Todos");
+  const [platform, setPlatform] = useState("Todas");
+  const [genre, setGenre] = useState("Todos");
+  const [series, setSeries] = useState("Todas");
+  const [priority, setPriority] = useState("Todas");
+  const [year, setYear] = useState("Todos");
+  const [list, setList] = useState("Todas");
+  const [duration, setDuration] = useState("Todas");
+  const [difficulty, setDifficulty] = useState("Todas");
+  const [sort, setSort] = useState("updated");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dialog, setDialog] = useState(false);
+  const [catalogDialog, setCatalogDialog] = useState(false);
+  const [settingsDialog, setSettingsDialog] = useState(false);
+  const [statsDialog, setStatsDialog] = useState(false);
+  const [randomDialog, setRandomDialog] = useState(false);
+  const [goalsDialog, setGoalsDialog] = useState(false);
+  const [editing, setEditing] = useState<Game | null>(null);
+  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+  const [draft, setDraft] = useState<Draft>(blank);
+  const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [profilesDialogOpen, setProfilesDialogOpen] = useState(false);
+  const [publicProfileSettings, setPublicProfileSettings] = useState<PublicProfileSettings>(
+    defaultProfileSettings
+  );
+  const [publicViewUid, setPublicViewUid] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("share") || params.get("user") || null;
     }
     return null;
   });
-  const backupInput=useRef<HTMLInputElement>(null);
 
-  useEffect(()=>{
-    if(!auth||!db){queueMicrotask(()=>{setLoading(false);setAuthReady(true)});return}
-    const authClient=auth, store=db;
-    const fallback=window.setTimeout(()=>{setUser(authClient.currentUser);setAuthReady(true);setLoading(false)},4000);
-    const unsubscribe=onAuthStateChanged(authClient,async current=>{
-      window.clearTimeout(fallback);setUser(current);setAuthReady(true);
-      if(!current){setGames([]);setGoals(defaultGoals);setSettings(defaultSettings);setLoading(false);return}
+  const backupInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!auth || !db) {
+      queueMicrotask(() => {
+        setLoading(false);
+        setAuthReady(true);
+      });
+      return;
+    }
+    const authClient = auth;
+    const store = db;
+    const fallback = window.setTimeout(() => {
+      setUser(authClient.currentUser);
+      setAuthReady(true);
+      setLoading(false);
+    }, 4000);
+
+    const unsubscribe = onAuthStateChanged(authClient, async current => {
+      window.clearTimeout(fallback);
+      setUser(current);
+      setAuthReady(true);
+      if (!current) {
+        setGames([]);
+        setGoals(defaultGoals);
+        setSettings(defaultSettings);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
-      try{
+      try {
         let snapshot;
-        try{
-          snapshot=await getDocs(firestoreQuery(collection(store,"users",current.uid,"games"),orderBy("updatedAt","desc")));
-        }catch(orderError){
+        try {
+          snapshot = await getDocs(
+            firestoreQuery(collection(store, "users", current.uid, "games"), orderBy("updatedAt", "desc"))
+          );
+        } catch (orderError) {
           console.warn("Retrying games fetch without orderBy:", orderError);
-          snapshot=await getDocs(collection(store,"users",current.uid,"games"));
+          snapshot = await getDocs(collection(store, "users", current.uid, "games"));
         }
-        setGames(snapshot.docs.map(item=>{const data=item.data() as Partial<Omit<Game,"id"|"updatedAt">>&{updatedAt?:{toDate?:()=>Date}|string};const updated=data.updatedAt;return {...blank,...data,id:item.id,updatedAt:typeof updated==="string"?updated:updated?.toDate?.().toISOString()??new Date().toISOString()} as Game}));
+        setGames(
+          snapshot.docs.map(item => {
+            const data = item.data() as Partial<Omit<Game, "id" | "updatedAt">> & {
+              updatedAt?: { toDate?: () => Date } | string;
+            };
+            const updated = data.updatedAt;
+            return {
+              ...blank,
+              ...data,
+              id: item.id,
+              updatedAt:
+                typeof updated === "string"
+                  ? updated
+                  : updated?.toDate?.().toISOString() ?? new Date().toISOString(),
+            } as Game;
+          })
+        );
 
-        const [goalsSnapshot,settingsSnapshot,pubSnap]=await Promise.all([
-          getDoc(doc(store,"users",current.uid,"settings","goals")).catch(()=>null),
-          getDoc(doc(store,"users",current.uid,"settings","preferences")).catch(()=>null),
-          getDoc(doc(store,"publicProfiles",current.uid)).catch(()=>null),
+        const [goalsSnapshot, settingsSnapshot, pubSnap] = await Promise.all([
+          getDoc(doc(store, "users", current.uid, "settings", "goals")).catch(() => null),
+          getDoc(doc(store, "users", current.uid, "settings", "preferences")).catch(() => null),
+          getDoc(doc(store, "publicProfiles", current.uid)).catch(() => null),
         ]);
-        if(goalsSnapshot?.exists())setGoals({...defaultGoals,...goalsSnapshot.data()} as Goals);
-        if(settingsSnapshot?.exists()){const preferences={...defaultSettings,...settingsSnapshot.data()} as AppSettings;setSettings(preferences);setViewMode(preferences.defaultView);setSort(preferences.defaultSort)}
-        if(pubSnap?.exists()){
-          const pubData=pubSnap.data() as PublicProfileData;
-          setPublicProfileSettings({
-            isPublic:pubData.isPublic??false,
-            handle:pubData.handle||current.displayName||"Gamer",
-            bio:pubData.bio||defaultProfileSettings.bio,
-            hideNotes:pubData.settings?.hideNotes??true,
-            hideSessions:pubData.settings?.hideSessions??true,
-            hideHours:pubData.settings?.hideHours??false,
-            hideWishlist:pubData.settings?.hideWishlist??false,
-          });
-        }else{
-          setPublicProfileSettings({...defaultProfileSettings,handle:current.displayName||"Gamer"});
+        if (goalsSnapshot?.exists()) setGoals({ ...defaultGoals, ...goalsSnapshot.data() } as Goals);
+        if (settingsSnapshot?.exists()) {
+          const preferences = { ...defaultSettings, ...settingsSnapshot.data() } as AppSettings;
+          setSettings(preferences);
+          setViewMode(preferences.defaultView);
+          setSort(preferences.defaultSort);
         }
-      }catch(error){console.error("Error loading library:", error);toast.error("No pudimos cargar tu biblioteca.")}finally{setLoading(false)}
+        if (pubSnap?.exists()) {
+          const pubData = pubSnap.data() as PublicProfileData;
+          setPublicProfileSettings({
+            isPublic: pubData.isPublic ?? false,
+            handle: pubData.handle || current.displayName || "Gamer",
+            bio: pubData.bio || defaultProfileSettings.bio,
+            hideNotes: pubData.settings?.hideNotes ?? true,
+            hideSessions: pubData.settings?.hideSessions ?? true,
+            hideHours: pubData.settings?.hideHours ?? false,
+            hideWishlist: pubData.settings?.hideWishlist ?? false,
+          });
+        } else {
+          setPublicProfileSettings({ ...defaultProfileSettings, handle: current.displayName || "Gamer" });
+        }
+      } catch (error) {
+        console.error("Error loading library:", error);
+        toast.error("No pudimos cargar tu biblioteca.");
+      } finally {
+        setLoading(false);
+      }
     });
-    return()=>{window.clearTimeout(fallback);unsubscribe()}
-  },[]);
-  useEffect(()=>{
-    if("serviceWorker" in navigator)navigator.serviceWorker.register(new URL("sw.js",document.baseURI).pathname,{scope:new URL("./",document.baseURI).pathname}).catch(error=>console.warn("Service worker",error));
-    const capture=(event:Event)=>{event.preventDefault();setInstallPrompt(event as InstallPromptEvent)};
-    window.addEventListener("beforeinstallprompt",capture);
-    return()=>window.removeEventListener("beforeinstallprompt",capture)
-  },[]);
-  useEffect(()=>{
-    const context=(document as unknown as {modelContext?:{registerTool:(tool:unknown,options?:{signal:AbortSignal})=>void}}).modelContext;
-    if(!context?.registerTool)return;
-    const lifecycle=new AbortController();
-    context.registerTool({name:"list_game_collection",title:"Ver colección",description:"Devuelve los juegos visibles en la biblioteca con su estado y progreso.",inputSchema:{type:"object",properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:false},execute:()=>({games:games.map(({id,title,platform,status,progress,nextGoal})=>({id,title,platform,status,progress,nextGoal}))})},{signal:lifecycle.signal});
-    context.registerTool({name:"start_adding_game",title:"Añadir juego",description:"Abre el formulario visible para añadir un juego a la biblioteca.",inputSchema:{type:"object",properties:{title:{type:"string"}},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute:(input:unknown)=>{const title=typeof input==="object"&&input&&"title" in input?String((input as {title?:unknown}).title??""):"";setEditing(null);setDraft({...blank,title});setDialog(true);return {opened:true,title}}},{signal:lifecycle.signal});
-    return()=>lifecycle.abort();
-  },[games]);
-  const genres=useMemo(()=>[...new Set(games.flatMap(g=>g.genre.split(",").map(v=>v.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"es")),[games]);
-  const seriesOptions=useMemo(()=>[...new Set(games.map(g=>g.series.trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es")),[games]);
-  const years=useMemo(()=>[...new Set(games.map(g=>g.releaseYear).filter(v=>v>0))].sort((a,b)=>b-a),[games]);
-  const advancedFilterCount=[platform!=="Todas",genre!=="Todos",series!=="Todas",priority!=="Todas",year!=="Todos",list!=="Todas",duration!=="Todas",difficulty!=="Todas"].filter(Boolean).length;
-  const filtered=useMemo(()=>games.filter(g=>{
-    const haystack=[g.title,g.series,g.nextGoal,g.genre,g.developer,g.notes].join(" ").toLowerCase();
-    return (!settings.hideAbandoned||g.status!=="Abandonado")&&(!settings.hidePending||g.status!=="Pendiente de compra")&&(tab==="Todos"||g.status===tab)&&(platform==="Todas"||g.platform===platform)&&(genre==="Todos"||g.genre.split(",").map(v=>v.trim()).includes(genre))&&(series==="Todas"||g.series===series)&&(priority==="Todas"||g.priority===priority)&&(year==="Todos"||g.releaseYear===Number(year))&&(list==="Todas"||(g.lists??[]).includes(list))&&(duration==="Todas"||(g.estimatedHours>0&&g.estimatedHours<=Number(duration)))&&(difficulty==="Todas"||g.difficulty===difficulty)&&haystack.includes(query.trim().toLowerCase());
-  }).sort((a,b)=>sort==="title"?a.title.localeCompare(b.title,"es"):sort==="progress"?b.progress-a.progress:sort==="hours"?b.hours-a.hours:sort==="release"?b.releaseYear-a.releaseYear:new Date(b.updatedAt).getTime()-new Date(a.updatedAt).getTime()),[games,tab,platform,genre,series,priority,year,list,duration,difficulty,sort,query,settings.hideAbandoned,settings.hidePending]);
-  const stats=useMemo(()=>({total:games.length,active:games.filter(g=>g.status==="Jugando").length,done:games.filter(g=>["Terminado","Completado"].includes(g.status)).length,hours:games.reduce((s,g)=>s+g.hours,0)}),[games]);
-  const statItems: Array<{Icon:LucideIcon;label:string;value:number}>=[{Icon:Library,label:"Biblioteca",value:stats.total},{Icon:Gamepad2,label:"Jugando",value:stats.active},{Icon:Trophy,label:"Terminados",value:stats.done},{Icon:Clock3,label:"Horas",value:stats.hours}];
-  const consoleStats=useMemo(()=>platforms.map(p=>({p,n:games.filter(g=>g.platform===p).length})).filter(x=>x.n).sort((a,b)=>b.n-a.n),[games]);
-  const openNew=()=>{setEditing(null);setDraft({...blank,status:settings.defaultStatus,platform:settings.defaultPlatform,format:settings.defaultFormat});setDialog(true)};
-  const openEdit=(g:Game)=>{setEditing(g);setDraft({...g});setDialog(true)};
-  const resetFilters=()=>{setQuery("");setTab("Todos");setPlatform("Todas");setGenre("Todos");setSeries("Todas");setPriority("Todas");setYear("Todos");setList("Todas");setDuration("Todas");setDifficulty("Todas");setSort("updated");setFiltersOpen(false)};
-  async function login(){if(!auth||signingIn)return;setSigningIn(true);try{await setPersistence(auth,browserLocalPersistence);const result=await signInWithPopup(auth,googleProvider);setUser(result.user);setAuthReady(true)}catch(error){console.error(error);toast.error("No pudimos iniciar sesión con Google.")}finally{setSigningIn(false)}}
-  async function logout(){if(auth)await signOut(auth)}
-  async function syncPublic(nextGames:Game[]){
-    if(!publicProfileSettings.isPublic||!user||!db)return;
-    try{await savePublicProfileToFirestore(db,user.uid,publicProfileSettings,nextGames)}catch(e){console.warn("Error sync public profile",e)}
-  }
-  async function installApp(){if(!installPrompt)return;await installPrompt.prompt();const result=await installPrompt.userChoice;if(result.outcome==="accepted")toast.success("Mi Bóveda Gamer se está instalando");setInstallPrompt(null)}
-  async function saveGoals(next:Goals){if(!user||!db)return;try{await setDoc(doc(db,"users",user.uid,"settings","goals"),next,{merge:true});setGoals(next);setGoalsDialog(false);toast.success("Metas guardadas")}catch(error){console.error(error);toast.error("No pudimos guardar tus metas.")}}
-  async function saveSettings(next:AppSettings){if(!user||!db)return;try{await setDoc(doc(db,"users",user.uid,"settings","preferences"),next,{merge:true});setSettings(next);setViewMode(next.defaultView);setSort(next.defaultSort);setSettingsDialog(false);toast.success("Configuración guardada")}catch(error){console.error(error);toast.error("No pudimos guardar la configuración.")}}
-  async function save(){if(!draft.title.trim())return toast.error("Escribe el nombre del juego.");if(draft.coverUrl?.trim().startsWith("data:"))return toast.error("La carátula debe ser un enlace web (http/https). Las imágenes en Base64 no están permitidas.");if(draft.coverUrl&&draft.coverUrl.trim().length>2048)return toast.error("La URL de la carátula supera el límite de 2048 caracteres.");if(!user||!db)return toast.error("Inicia sesión para guardar.");if(!editing){const sameTitle=games.filter(game=>normalizeTitle(game.title)===normalizeTitle(draft.title));const exact=sameTitle.find(game=>game.platform===draft.platform);if(exact&&!confirm(`“${exact.title}” ya existe para ${draft.platform}. ¿Quieres guardar otro registro de todos modos?`))return;if(!exact&&sameTitle.length)toast.info(`Ya tienes este título en ${sameTitle.map(game=>game.platform).join(", ")}; se guardará la versión de ${draft.platform}.`)}setSaving(true);try{const now=new Date().toISOString();const payload={...draft,updatedAt:serverTimestamp()};let nextGames:Game[];if(editing){await updateDoc(doc(db,"users",user.uid,"games",editing.id),payload);const updatedGame={...draft,id:editing.id,updatedAt:now};nextGames=games.map(g=>g.id===editing.id?updatedGame:g);setGames(nextGames);setSelectedGame(current=>current?.id===editing.id?updatedGame:current)}else{const created=await addDoc(collection(db,"users",user.uid,"games"),{...payload,createdAt:serverTimestamp()});nextGames=[{...draft,id:created.id,updatedAt:now},...games];setGames(nextGames)}void syncPublic(nextGames);setDialog(false);toast.success(editing?"Partida actualizada":"Juego añadido a tu bóveda")}catch(error){console.error(error);toast.error("No pudimos guardar.")}finally{setSaving(false)}}
-  async function addCatalogGames(entries:Draft[]){if(!user||!db)return 0;const knownIds=new Set(games.map(game=>game.sourceId).filter(Boolean)),knownTitles=new Set(games.map(game=>normalizeTitle(game.title))),accepted=entries.filter(entry=>{const title=normalizeTitle(entry.title);if((entry.sourceId&&knownIds.has(entry.sourceId))||knownTitles.has(title))return false;if(entry.sourceId)knownIds.add(entry.sourceId);knownTitles.add(title);return true});const created:Game[]=[];try{for(const entry of accepted){const reference=await addDoc(collection(db,"users",user.uid,"games"),{...entry,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});created.push({...entry,id:reference.id,updatedAt:new Date().toISOString()})}}finally{if(created.length){const nextGames=[...created,...games];setGames(nextGames);void syncPublic(nextGames)}}if(created.length)toast.success(`${created.length} juego${created.length===1?"":"s"} añadido${created.length===1?"":"s"} a tu bóveda`);return created.length}
-  async function remove(g:Game){if((settings.confirmDelete&&!confirm(`¿Eliminar “${g.title}” de tu biblioteca?`))||!user||!db)return;try{await deleteDoc(doc(db,"users",user.uid,"games",g.id));const nextGames=games.filter(v=>v.id!==g.id);setGames(nextGames);setSelectedGame(current=>current?.id===g.id?null:current);void syncPublic(nextGames);toast.success("Juego eliminado")}catch{toast.error("No pudimos eliminarlo.")}}
-  async function quickUpdate(game:Game,changes:Partial<Game>,message:string){if(!user||!db)return;const next={...game,...changes,updatedAt:new Date().toISOString()};try{await updateDoc(doc(db,"users",user.uid,"games",game.id),{...changes,updatedAt:serverTimestamp()});const nextGames=games.map(item=>item.id===game.id?next:item);setGames(nextGames);setSelectedGame(current=>current?.id===game.id?next:current);void syncPublic(nextGames);toast.success(message)}catch(error){console.error(error);toast.error("No pudimos actualizar el juego.")}}
-  async function addSession(game:Game,session:Omit<Session,"id">){if(!user||!db)return;const entry={...session,id:crypto.randomUUID()},sessions=[entry,...(game.sessions??[])],hours=Math.round((game.hours+entry.hours)*10)/10,updatedAt=new Date().toISOString();try{await updateDoc(doc(db,"users",user.uid,"games",game.id),{sessions,hours,updatedAt:serverTimestamp()});const next={...game,sessions,hours,updatedAt};const nextGames=games.map(item=>item.id===game.id?next:item);setGames(nextGames);setSelectedGame(current=>current?.id===game.id?next:current);void syncPublic(nextGames);toast.success("Sesión registrada")}catch(error){console.error(error);toast.error("No pudimos guardar la sesión.")}}
-  function downloadBackup(kind:"json"|"csv"){
-    if(!games.length)return toast.error("Aún no hay juegos para exportar.");
-    const date=new Date().toISOString().slice(0,10),name=`mi-boveda-gamer-${date}.${kind}`;
-    let content:string,mime:string;
-    if(kind==="json"){content=JSON.stringify({version:2,exportedAt:new Date().toISOString(),settings,goals,games:games.map(game=>Object.fromEntries(Object.entries(game).filter(([key])=>key!=="id"&&key!=="updatedAt")))},null,2);mime="application/json"}
-    else{const columns:[string,(g:Game)=>unknown][]=[["Juego",g=>g.title],["Consola",g=>g.platform],["Formato",g=>g.format],["Estado",g=>g.status],["Progreso",g=>g.progress],["Horas",g=>g.hours],["Duración estimada",g=>g.estimatedHours||""],["Dificultad",g=>g.difficulty],["Prioridad",g=>g.priority],["Saga",g=>g.series],["Listas",g=>(g.lists??[]).join("; ")],["Género",g=>g.genre],["Desarrollador",g=>g.developer],["Año",g=>g.releaseYear||""],["Calificación",g=>g.rating||""],["Inicio",g=>g.startedAt],["Fin",g=>g.finishedAt],["Próximo objetivo",g=>g.nextGoal],["Notas",g=>g.notes],["Descripción",g=>g.description],["Carátula",g=>g.coverUrl]];const escape=(value:unknown)=>`"${String(value??"").replaceAll('"','""')}"`;content=[columns.map(([label])=>escape(label)).join(","),...games.map(game=>columns.map(([,read])=>escape(read(game))).join(","))].join("\n");mime="text/csv;charset=utf-8"}
-    const url=URL.createObjectURL(new Blob([content],{type:mime})),anchor=document.createElement("a");anchor.href=url;anchor.download=name;anchor.click();URL.revokeObjectURL(url);toast.success(`Copia ${kind.toUpperCase()} descargada`)
-  }
-  async function restoreBackup(file:File){if(!user||!db)return;setImporting(true);try{const parsed=JSON.parse(await file.text()) as unknown,backup=typeof parsed==="object"&&parsed!==null?parsed as {games?:unknown;settings?:Partial<AppSettings>;goals?:Partial<Goals>}:null,source=Array.isArray(parsed)?parsed:backup?.games;if(!Array.isArray(source))throw new Error("Formato inválido");const valid=source.filter((item):item is Record<string,unknown>=>typeof item==="object"&&item!==null&&typeof (item as {title?:unknown}).title==="string"&&String((item as {title:unknown}).title).trim().length>0);if(!valid.length)throw new Error("No games");if(!confirm(`Se importarán ${valid.length} juego${valid.length===1?"":"s"}. Los existentes no se eliminarán. ¿Continuar?`))return;const imported:Game[]=[];for(const raw of valid){const normalized={...blank,...raw,id:undefined,updatedAt:undefined,sessions:Array.isArray(raw.sessions)?raw.sessions:[]};delete normalized.id;delete normalized.updatedAt;if(typeof normalized.coverUrl==="string"&&(normalized.coverUrl.startsWith("data:")||normalized.coverUrl.length>2048)){normalized.coverUrl="";}const created=await addDoc(collection(db,"users",user.uid,"games"),{...normalized,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});imported.push({...blank,...normalized,id:created.id,updatedAt:new Date().toISOString()} as Game)}const nextGames=[...imported,...games];setGames(nextGames);void syncPublic(nextGames);if(backup?.settings){const restored={...defaultSettings,...backup.settings};await setDoc(doc(db,"users",user.uid,"settings","preferences"),restored,{merge:true});setSettings(restored);setViewMode(restored.defaultView);setSort(restored.defaultSort)}if(backup?.goals){const restored={...defaultGoals,...backup.goals};await setDoc(doc(db,"users",user.uid,"settings","goals"),restored,{merge:true});setGoals(restored)}toast.success(`${imported.length} juego${imported.length===1?"":"s"} restaurado${imported.length===1?"":"s"}`)}catch(error){console.error(error);toast.error("El archivo no es una copia JSON válida.")}finally{setImporting(false);if(backupInput.current)backupInput.current.value=""}}
+    return () => {
+      window.clearTimeout(fallback);
+      unsubscribe();
+    };
+  }, []);
 
-  if(publicViewUid){
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register(new URL("sw.js", document.baseURI).pathname, {
+          scope: new URL("./", document.baseURI).pathname,
+        })
+        .catch(error => console.warn("Service worker", error));
+    }
+    const capture = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", capture);
+    return () => window.removeEventListener("beforeinstallprompt", capture);
+  }, []);
+
+  useEffect(() => {
+    const context = (
+      document as unknown as {
+        modelContext?: { registerTool: (tool: unknown, options?: { signal: AbortSignal }) => void };
+      }
+    ).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    context.registerTool(
+      {
+        name: "list_game_collection",
+        title: "Ver colección",
+        description: "Devuelve los juegos visibles en la biblioteca con su estado y progreso.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        execute: () => ({
+          games: games.map(({ id, title, platform, status, progress, nextGoal }) => ({
+            id,
+            title,
+            platform,
+            status,
+            progress,
+            nextGoal,
+          })),
+        }),
+      },
+      { signal: lifecycle.signal }
+    );
+    context.registerTool(
+      {
+        name: "start_adding_game",
+        title: "Añadir juego",
+        description: "Abre el formulario visible para añadir un juego a la biblioteca.",
+        inputSchema: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        execute: (input: unknown) => {
+          const title =
+            typeof input === "object" && input && "title" in input
+              ? String((input as { title?: unknown }).title ?? "")
+              : "";
+          setEditing(null);
+          setDraft({ ...blank, title });
+          setDialog(true);
+          return { opened: true, title };
+        },
+      },
+      { signal: lifecycle.signal }
+    );
+    return () => lifecycle.abort();
+  }, [games]);
+
+  const genres = useMemo(
+    () =>
+      [...new Set(games.flatMap(g => g.genre.split(",").map(v => v.trim()).filter(Boolean)))].sort(
+        (a, b) => a.localeCompare(b, "es")
+      ),
+    [games]
+  );
+  const seriesOptions = useMemo(
+    () => [...new Set(games.map(g => g.series.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")),
+    [games]
+  );
+  const years = useMemo(
+    () => [...new Set(games.map(g => g.releaseYear).filter(v => v > 0))].sort((a, b) => b - a),
+    [games]
+  );
+  const advancedFilterCount = [
+    platform !== "Todas",
+    genre !== "Todos",
+    series !== "Todas",
+    priority !== "Todas",
+    year !== "Todos",
+    list !== "Todas",
+    duration !== "Todas",
+    difficulty !== "Todas",
+  ].filter(Boolean).length;
+
+  const filtered = useMemo(
+    () =>
+      games
+        .filter(g => {
+          const haystack = [g.title, g.series, g.nextGoal, g.genre, g.developer, g.notes]
+            .join(" ")
+            .toLowerCase();
+          return (
+            (!settings.hideAbandoned || g.status !== "Abandonado") &&
+            (!settings.hidePending || g.status !== "Pendiente de compra") &&
+            (tab === "Todos" || g.status === tab) &&
+            (platform === "Todas" || g.platform === platform) &&
+            (genre === "Todos" || g.genre.split(",").map(v => v.trim()).includes(genre)) &&
+            (series === "Todas" || g.series === series) &&
+            (priority === "Todas" || g.priority === priority) &&
+            (year === "Todos" || g.releaseYear === Number(year)) &&
+            (list === "Todas" || (g.lists ?? []).includes(list)) &&
+            (duration === "Todas" || (g.estimatedHours > 0 && g.estimatedHours <= Number(duration))) &&
+            (difficulty === "Todas" || g.difficulty === difficulty) &&
+            haystack.includes(query.trim().toLowerCase())
+          );
+        })
+        .sort((a, b) =>
+          sort === "title"
+            ? a.title.localeCompare(b.title, "es")
+            : sort === "progress"
+            ? b.progress - a.progress
+            : sort === "hours"
+            ? b.hours - a.hours
+            : sort === "release"
+            ? b.releaseYear - a.releaseYear
+            : new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        ),
+    [
+      games,
+      tab,
+      platform,
+      genre,
+      series,
+      priority,
+      year,
+      list,
+      duration,
+      difficulty,
+      sort,
+      query,
+      settings.hideAbandoned,
+      settings.hidePending,
+    ]
+  );
+
+  const stats = useMemo(
+    () => ({
+      total: games.length,
+      active: games.filter(g => g.status === "Jugando").length,
+      done: games.filter(g => ["Terminado", "Completado"].includes(g.status)).length,
+      hours: games.reduce((s, g) => s + g.hours, 0),
+    }),
+    [games]
+  );
+
+  const statItems: Array<{ Icon: LucideIcon; label: string; value: number }> = [
+    { Icon: Library, label: "Biblioteca", value: stats.total },
+    { Icon: Gamepad2, label: "Jugando", value: stats.active },
+    { Icon: Trophy, label: "Terminados", value: stats.done },
+    { Icon: Clock3, label: "Horas", value: stats.hours },
+  ];
+
+  const consoleStats = useMemo(
+    () => platforms.map(p => ({ p, n: games.filter(g => g.platform === p).length })).filter(x => x.n).sort((a, b) => b.n - a.n),
+    [games]
+  );
+
+  const openNew = () => {
+    setEditing(null);
+    setDraft({
+      ...blank,
+      status: settings.defaultStatus,
+      platform: settings.defaultPlatform,
+      format: settings.defaultFormat,
+    });
+    setDialog(true);
+  };
+
+  const openEdit = (g: Game) => {
+    setEditing(g);
+    setDraft({ ...g });
+    setDialog(true);
+  };
+
+  const resetFilters = () => {
+    setQuery("");
+    setTab("Todos");
+    setPlatform("Todas");
+    setGenre("Todos");
+    setSeries("Todas");
+    setPriority("Todas");
+    setYear("Todos");
+    setList("Todas");
+    setDuration("Todas");
+    setDifficulty("Todas");
+    setSort("updated");
+    setFiltersOpen(false);
+  };
+
+  async function login() {
+    if (!auth || signingIn) return;
+    setSigningIn(true);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      const result = await signInWithPopup(auth, googleProvider);
+      setUser(result.user);
+      setAuthReady(true);
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos iniciar sesión con Google.");
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
+  async function logout() {
+    if (auth) await signOut(auth);
+  }
+
+  async function syncPublic(nextGames: Game[]) {
+    if (!publicProfileSettings.isPublic || !user || !db) return;
+    try {
+      await savePublicProfileToFirestore(db, user.uid, publicProfileSettings, nextGames);
+    } catch (e) {
+      console.warn("Error sync public profile", e);
+    }
+  }
+
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const result = await installPrompt.userChoice;
+    if (result.outcome === "accepted") toast.success("Mi Bóveda Gamer se está instalando");
+    setInstallPrompt(null);
+  }
+
+  async function saveGoals(next: Goals) {
+    if (!user || !db) return;
+    try {
+      await setDoc(doc(db, "users", user.uid, "settings", "goals"), next, { merge: true });
+      setGoals(next);
+      setGoalsDialog(false);
+      toast.success("Metas guardadas");
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos guardar tus metas.");
+    }
+  }
+
+  async function saveSettings(next: AppSettings) {
+    if (!user || !db) return;
+    try {
+      await setDoc(doc(db, "users", user.uid, "settings", "preferences"), next, { merge: true });
+      setSettings(next);
+      setViewMode(next.defaultView);
+      setSort(next.defaultSort);
+      setSettingsDialog(false);
+      toast.success("Configuración guardada");
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos guardar la configuración.");
+    }
+  }
+
+  async function save() {
+    if (!draft.title.trim()) return toast.error("Escribe el nombre del juego.");
+    if (draft.coverUrl?.trim().startsWith("data:")) {
+      return toast.error("La carátula debe ser un enlace web (http/https). Las imágenes en Base64 no están permitidas.");
+    }
+    if (draft.coverUrl && draft.coverUrl.trim().length > 2048) {
+      return toast.error("La URL de la carátula supera el límite de 2048 caracteres.");
+    }
+    if (!user || !db) return toast.error("Inicia sesión para guardar.");
+    if (!editing) {
+      const sameTitle = games.filter(
+        game => normalizeTitle(game.title) === normalizeTitle(draft.title)
+      );
+      const exact = sameTitle.find(game => game.platform === draft.platform);
+      if (
+        exact &&
+        !confirm(`“${exact.title}” ya existe para ${draft.platform}. ¿Quieres guardar otro registro de todos modos?`)
+      )
+        return;
+      if (!exact && sameTitle.length) {
+        toast.info(
+          `Ya tienes este título en ${sameTitle.map(game => game.platform).join(", ")}; se guardará la versión de ${draft.platform}.`
+        );
+      }
+    }
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const payload = { ...draft, updatedAt: serverTimestamp() };
+      let nextGames: Game[];
+      if (editing) {
+        await updateDoc(doc(db, "users", user.uid, "games", editing.id), payload);
+        const updatedGame = { ...draft, id: editing.id, updatedAt: now };
+        nextGames = games.map(g => (g.id === editing.id ? updatedGame : g));
+        setGames(nextGames);
+        setSelectedGame(current => (current?.id === editing.id ? updatedGame : current));
+      } else {
+        const created = await addDoc(collection(db, "users", user.uid, "games"), {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+        nextGames = [{ ...draft, id: created.id, updatedAt: now }, ...games];
+        setGames(nextGames);
+      }
+      void syncPublic(nextGames);
+      setDialog(false);
+      toast.success(editing ? "Partida actualizada" : "Juego añadido a tu bóveda");
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos guardar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addCatalogGames(entries: Draft[]) {
+    if (!user || !db) return 0;
+    const knownIds = new Set(games.map(game => game.sourceId).filter(Boolean));
+    const knownTitles = new Set(games.map(game => normalizeTitle(game.title)));
+    const accepted = entries.filter(entry => {
+      const title = normalizeTitle(entry.title);
+      if ((entry.sourceId && knownIds.has(entry.sourceId)) || knownTitles.has(title)) return false;
+      if (entry.sourceId) knownIds.add(entry.sourceId);
+      knownTitles.add(title);
+      return true;
+    });
+    const created: Game[] = [];
+    try {
+      for (const entry of accepted) {
+        const reference = await addDoc(collection(db, "users", user.uid, "games"), {
+          ...entry,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        created.push({ ...entry, id: reference.id, updatedAt: new Date().toISOString() });
+      }
+    } finally {
+      if (created.length) {
+        const nextGames = [...created, ...games];
+        setGames(nextGames);
+        void syncPublic(nextGames);
+      }
+    }
+    if (created.length) {
+      toast.success(`${created.length} juego${created.length === 1 ? "" : "s"} añadido${created.length === 1 ? "" : "s"} a tu bóveda`);
+    }
+    return created.length;
+  }
+
+  async function remove(g: Game) {
+    if ((settings.confirmDelete && !confirm(`¿Eliminar “${g.title}” de tu biblioteca?`)) || !user || !db) return;
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "games", g.id));
+      const nextGames = games.filter(v => v.id !== g.id);
+      setGames(nextGames);
+      setSelectedGame(current => (current?.id === g.id ? null : current));
+      void syncPublic(nextGames);
+      toast.success("Juego eliminado");
+    } catch {
+      toast.error("No pudimos eliminarlo.");
+    }
+  }
+
+  async function quickUpdate(game: Game, changes: Partial<Game>, message: string) {
+    if (!user || !db) return;
+    const next = { ...game, ...changes, updatedAt: new Date().toISOString() };
+    try {
+      await updateDoc(doc(db, "users", user.uid, "games", game.id), {
+        ...changes,
+        updatedAt: serverTimestamp(),
+      });
+      const nextGames = games.map(item => (item.id === game.id ? next : item));
+      setGames(nextGames);
+      setSelectedGame(current => (current?.id === game.id ? next : current));
+      void syncPublic(nextGames);
+      toast.success(message);
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos actualizar el juego.");
+    }
+  }
+
+  async function addSession(game: Game, session: Omit<Session, "id">) {
+    if (!user || !db) return;
+    const entry = { ...session, id: crypto.randomUUID() };
+    const sessions = [entry, ...(game.sessions ?? [])];
+    const hours = Math.round((game.hours + entry.hours) * 10) / 10;
+    const updatedAt = new Date().toISOString();
+    try {
+      await updateDoc(doc(db, "users", user.uid, "games", game.id), {
+        sessions,
+        hours,
+        updatedAt: serverTimestamp(),
+      });
+      const next = { ...game, sessions, hours, updatedAt };
+      const nextGames = games.map(item => (item.id === game.id ? next : item));
+      setGames(nextGames);
+      setSelectedGame(current => (current?.id === game.id ? next : current));
+      void syncPublic(nextGames);
+      toast.success("Sesión registrada");
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos guardar la sesión.");
+    }
+  }
+
+  function downloadBackup(kind: "json" | "csv") {
+    const date = new Date().toISOString().slice(0, 10);
+    const name = `mi-boveda-gamer-${date}.${kind}`;
+    let content = "";
+    let mime = "application/json;charset=utf-8";
+    if (kind === "json") {
+      content = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), games, settings, goals }, null, 2);
+    } else {
+      const columns: [string, (g: Game) => unknown][] = [
+        ["Juego", g => g.title],
+        ["Consola", g => g.platform],
+        ["Formato", g => g.format],
+        ["Estado", g => g.status],
+        ["Progreso", g => g.progress],
+        ["Horas", g => g.hours],
+        ["Duración estimada", g => g.estimatedHours || ""],
+        ["Dificultad", g => g.difficulty],
+        ["Prioridad", g => g.priority],
+        ["Saga", g => g.series],
+        ["Listas", g => (g.lists ?? []).join("; ")],
+        ["Género", g => g.genre],
+        ["Desarrollador", g => g.developer],
+        ["Año", g => g.releaseYear || ""],
+        ["Calificación", g => g.rating || ""],
+        ["Inicio", g => g.startedAt],
+        ["Fin", g => g.finishedAt],
+        ["Próximo objetivo", g => g.nextGoal],
+        ["Notas", g => g.notes],
+        ["Descripción", g => g.description],
+        ["Carátula", g => g.coverUrl],
+      ];
+      const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+      content = [
+        columns.map(([label]) => escape(label)).join(","),
+        ...games.map(game => columns.map(([, read]) => escape(read(game))).join(",")),
+      ].join("\n");
+      mime = "text/csv;charset=utf-8";
+    }
+    const url = URL.createObjectURL(new Blob([content], { type: mime }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = name;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Copia ${kind.toUpperCase()} descargada`);
+  }
+
+  async function restoreBackup(file: File) {
+    if (!user || !db) return;
+    setImporting(true);
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const backup =
+        typeof parsed === "object" && parsed !== null
+          ? (parsed as { games?: unknown; settings?: Partial<AppSettings>; goals?: Partial<Goals> })
+          : null;
+      const source = Array.isArray(parsed) ? parsed : backup?.games;
+      if (!Array.isArray(source)) throw new Error("Formato inválido");
+      const valid = source.filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { title?: unknown }).title === "string" &&
+          String((item as { title: unknown }).title).trim().length > 0
+      );
+      if (!valid.length) throw new Error("No games");
+      if (
+        !confirm(
+          `Se importarán ${valid.length} juego${valid.length === 1 ? "" : "s"}. Los existentes no se eliminarán. ¿Continuar?`
+        )
+      )
+        return;
+      const imported: Game[] = [];
+      for (const raw of valid) {
+        const normalized = {
+          ...blank,
+          ...raw,
+          id: undefined,
+          updatedAt: undefined,
+          sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
+        };
+        delete normalized.id;
+        delete normalized.updatedAt;
+        if (
+          typeof normalized.coverUrl === "string" &&
+          (normalized.coverUrl.startsWith("data:") || normalized.coverUrl.length > 2048)
+        ) {
+          normalized.coverUrl = "";
+        }
+        const created = await addDoc(collection(db, "users", user.uid, "games"), {
+          ...normalized,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        imported.push({ ...blank, ...normalized, id: created.id, updatedAt: new Date().toISOString() } as Game);
+      }
+      const nextGames = [...imported, ...games];
+      setGames(nextGames);
+      void syncPublic(nextGames);
+      if (backup?.settings) {
+        const restored = { ...defaultSettings, ...backup.settings };
+        await setDoc(doc(db, "users", user.uid, "settings", "preferences"), restored, { merge: true });
+        setSettings(restored);
+        setViewMode(restored.defaultView);
+        setSort(restored.defaultSort);
+      }
+      if (backup?.goals) {
+        const restored = { ...defaultGoals, ...backup.goals };
+        await setDoc(doc(db, "users", user.uid, "settings", "goals"), restored, { merge: true });
+        setGoals(restored);
+      }
+      toast.success(`${imported.length} juego${imported.length === 1 ? "" : "s"} restaurado${imported.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      console.error(error);
+      toast.error("El archivo no es una copia JSON válida.");
+    } finally {
+      setImporting(false);
+      if (backupInput.current) backupInput.current.value = "";
+    }
+  }
+
+  if (publicViewUid) {
     return (
       <>
-        <PublicProfileView userId={publicViewUid} db={db} isOwner={user?.uid===publicViewUid} onOpenProfilesDialog={()=>setProfilesDialogOpen(true)} onExitPreview={()=>{setPublicViewUid(null);if(typeof window!=="undefined"){const url=new URL(window.location.href);url.searchParams.delete("share");url.searchParams.delete("user");window.history.replaceState({},"",url.pathname+(url.search?`?${url.search}`:""))}}}/>
-        <ProfilesDialog open={profilesDialogOpen} setOpen={setProfilesDialogOpen} userId={user?.uid} userName={user?.displayName||"Gamer"} publicSettings={publicProfileSettings} onViewMyProfile={()=>user&&setPublicViewUid(user.uid)} onOpenShareSettings={()=>setShareOpen(true)} onLoadProfile={uid=>setPublicViewUid(uid)}/>
+        <PublicProfileView
+          userId={publicViewUid}
+          db={db}
+          isOwner={user?.uid === publicViewUid}
+          onOpenProfilesDialog={() => setProfilesDialogOpen(true)}
+          onExitPreview={() => {
+            setPublicViewUid(null);
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href);
+              url.searchParams.delete("share");
+              url.searchParams.delete("user");
+              window.history.replaceState({}, "", url.pathname + (url.search ? `?${url.search}` : ""));
+            }
+          }}
+        />
+        <ProfilesDialog
+          open={profilesDialogOpen}
+          setOpen={setProfilesDialogOpen}
+          userId={user?.uid}
+          userName={user?.displayName || "Gamer"}
+          publicSettings={publicProfileSettings}
+          onViewMyProfile={() => user && setPublicViewUid(user.uid)}
+          onOpenShareSettings={() => setShareOpen(true)}
+          onLoadProfile={uid => setPublicViewUid(uid)}
+        />
       </>
     );
   }
 
-  if(!isFirebaseConfigured)return <SetupNotice/>;
-  if(!authReady)return <div className="grid min-h-screen place-items-center bg-[#07101f] text-slate-300">Preparando tu bóveda…</div>;
-  if(!user)return (
-    <>
-      <SignIn onSignIn={login} signingIn={signingIn} onOpenProfiles={()=>setProfilesDialogOpen(true)}/>
-      <ProfilesDialog open={profilesDialogOpen} setOpen={setProfilesDialogOpen} userId={null} onLoadProfile={uid=>setPublicViewUid(uid)}/>
-    </>
+  if (!isFirebaseConfigured) return <SetupNotice />;
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#07101f] text-slate-300">
+        Preparando tu bóveda…
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <>
+        <SignIn onSignIn={login} signingIn={signingIn} onOpenProfiles={() => setProfilesDialogOpen(true)} />
+        <ProfilesDialog
+          open={profilesDialogOpen}
+          setOpen={setProfilesDialogOpen}
+          userId={null}
+          onLoadProfile={uid => setPublicViewUid(uid)}
+        />
+      </>
+    );
+  }
+
+  const profileName = user.displayName?.trim() || user.email?.split("@")[0] || "Jugador";
+  const profileInitials = profileName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(part => part[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="min-h-screen bg-[#07101f] text-slate-100">
+      <Toaster position="top-right" richColors />
+
+      {/* Header */}
+      <header className="sticky top-0 z-30 border-b border-white/8 bg-[#07101f]/95 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 py-3 lg:px-8">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-[0_0_28px_rgba(139,92,246,.3)]">
+              <Gamepad2 className="size-5" />
+            </div>
+            <div>
+              <div className="font-black tracking-tight">MI BÓVEDA</div>
+              <div className="-mt-1 text-[10px] font-bold tracking-[.22em] text-cyan-300">GAMER</div>
+            </div>
+          </div>
+
+          <nav
+            aria-label="Navegación principal"
+            className="order-3 flex w-full gap-1 rounded-xl bg-white/[.04] p-1 md:order-none md:ml-5 md:w-auto"
+          >
+            <Button variant="ghost" className="flex-1 bg-white/8 text-white md:flex-none">
+              <Library />
+              Biblioteca
+            </Button>
+            <Button
+              variant="ghost"
+              className="flex-1 text-slate-300 hover:text-white md:flex-none"
+              onClick={() => setCatalogDialog(true)}
+            >
+              <Compass />
+              Descubrir juegos
+            </Button>
+            <Button
+              variant="ghost"
+              className="flex-1 text-slate-300 hover:text-white md:flex-none"
+              onClick={() => setProfilesDialogOpen(true)}
+            >
+              <Globe className="mr-1.5 size-4 text-cyan-300" />
+              Ver perfiles
+            </Button>
+          </nav>
+
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+              onClick={() => setShareOpen(true)}
+              title="Compartir colección"
+            >
+              <Share2 className="mr-1.5 size-4 text-cyan-300" />
+              <span>Compartir</span>
+            </Button>
+            <Button
+              className="bg-violet-500 text-white hover:bg-violet-400"
+              onClick={openNew}
+              aria-label="Añadir juego"
+              title="Añadir juego"
+            >
+              <Plus />
+              <span className="hidden sm:inline">Añadir juego</span>
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="h-11 gap-2 rounded-xl px-2"
+                  aria-label={`Abrir menú de perfil de ${profileName}`}
+                >
+                  <Avatar size="lg" className="border border-white/15">
+                    <AvatarImage src={user.photoURL ?? undefined} alt={profileName} />
+                    <AvatarFallback className="bg-violet-500/20 font-bold text-violet-200">
+                      {profileInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="hidden max-w-32 truncate text-left text-sm font-semibold sm:block">
+                    {profileName}
+                  </span>
+                  <ChevronDown className="size-4 text-slate-500" />
+                </Button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent align="end" className="w-72 border-white/10 bg-[#0b1628] p-2 text-slate-100">
+                <DropdownMenuLabel className="flex items-center gap-3 px-2 py-3">
+                  <Avatar size="lg">
+                    <AvatarImage src={user.photoURL ?? undefined} alt={profileName} />
+                    <AvatarFallback className="bg-violet-500/20 text-violet-200">
+                      {profileInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">{profileName}</span>
+                    <span className="block truncate text-xs font-normal text-slate-400">{user.email}</span>
+                  </span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem onClick={() => setPublicViewUid(user.uid)}>
+                  <Eye />
+                  Ver mi perfil público
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setProfilesDialogOpen(true)}>
+                  <Globe />
+                  Ver perfiles públicos
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShareOpen(true)}>
+                  <Share2 />
+                  Compartir colección
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSettingsDialog(true)}>
+                  <Settings2 />
+                  Configuración
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setGoalsDialog(true)}>
+                  <Target />
+                  Metas personales
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setStatsDialog(true)}>
+                  <BarChart3 />
+                  Estadísticas
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setRandomDialog(true)}>
+                  <Dices />
+                  ¿Qué juego hoy?
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem onClick={() => downloadBackup("json")}>
+                  <FileJson />
+                  Exportar copia JSON
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => downloadBackup("csv")}>
+                  <Download />
+                  Exportar lista CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => backupInput.current?.click()} disabled={importing}>
+                  <Upload />
+                  {importing ? "Importando…" : "Restaurar copia"}
+                </DropdownMenuItem>
+                {installPrompt && (
+                  <>
+                    <DropdownMenuSeparator className="bg-white/10" />
+                    <DropdownMenuItem onClick={installApp}>
+                      <Download />
+                      Instalar aplicación
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem onClick={logout} variant="destructive">
+                  <LogOut />
+                  Cerrar sesión
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="mx-auto grid max-w-[1500px] gap-7 px-4 py-7 lg:grid-cols-[minmax(0,1fr)_310px] lg:px-8">
+        <section className="min-w-0">
+          {/* Header Stats */}
+          <div className="mb-7 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
+            <div>
+              <p className="mb-2 text-sm font-semibold text-cyan-300">Biblioteca personal</p>
+              <h1 className="text-3xl font-black tracking-[-.04em] sm:text-4xl">Mis juegos</h1>
+              <p className="mt-2 text-slate-400">
+                Consulta, organiza y continúa tus partidas desde un solo lugar.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {statItems.map(({ Icon, label, value }) => (
+                <div
+                  key={label}
+                  className="min-w-[110px] rounded-2xl border border-white/8 bg-white/[.045] px-3 py-3"
+                >
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Icon className="size-4 text-cyan-300" />
+                    {label}
+                  </div>
+                  <div className="mt-1 text-2xl font-black">{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Search and Filters */}
+          <div className="mb-5 rounded-2xl border border-white/8 bg-white/[.035] p-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_190px_220px_auto]">
+              <FilterControl label="Buscar en mi biblioteca">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
+                  <Input
+                    aria-label="Buscar en mi biblioteca"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Título, saga, género…"
+                    className="border-white/8 bg-[#07101f] pl-10"
+                  />
+                </div>
+              </FilterControl>
+
+              <FilterControl label="Estado">
+                <FilterSelect value={tab} change={setTab} all="Todos" label="Todos los estados" items={statuses} />
+              </FilterControl>
+
+              <FilterControl label="Ordenar por">
+                <Select value={sort} onValueChange={setSort}>
+                  <SelectTrigger className="w-full border-white/8 bg-[#07101f]">
+                    <ListFilter />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="updated">Actualizados recientemente</SelectItem>
+                    <SelectItem value="title">Título A–Z</SelectItem>
+                    <SelectItem value="progress">Mayor progreso</SelectItem>
+                    <SelectItem value="hours">Más horas jugadas</SelectItem>
+                    <SelectItem value="release">Lanzamiento más reciente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FilterControl>
+
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setFiltersOpen(open => !open)}
+                  aria-expanded={filtersOpen}
+                >
+                  <SlidersHorizontal />
+                  Más filtros
+                  {advancedFilterCount > 0 && (
+                    <Badge className="bg-violet-500 text-white">{advancedFilterCount}</Badge>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {filtersOpen && (
+              <div className="mt-4 grid gap-3 border-t border-white/8 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+                <FilterControl label="Plataforma">
+                  <FilterSelect
+                    value={platform}
+                    change={setPlatform}
+                    all="Todas"
+                    label="Todas las plataformas"
+                    items={platforms}
+                  />
+                </FilterControl>
+                <FilterControl label="Género">
+                  <FilterSelect
+                    value={genre}
+                    change={setGenre}
+                    all="Todos"
+                    label="Todos los géneros"
+                    items={genres}
+                  />
+                </FilterControl>
+                <FilterControl label="Saga">
+                  <FilterSelect
+                    value={series}
+                    change={setSeries}
+                    all="Todas"
+                    label="Todas las sagas"
+                    items={seriesOptions}
+                  />
+                </FilterControl>
+                <FilterControl label="Prioridad">
+                  <FilterSelect
+                    value={priority}
+                    change={setPriority}
+                    all="Todas"
+                    label="Todas las prioridades"
+                    items={["Alta", "Normal", "Baja"]}
+                  />
+                </FilterControl>
+                <FilterControl label="Año">
+                  <FilterSelect
+                    value={year}
+                    change={setYear}
+                    all="Todos"
+                    label="Todos los años"
+                    items={years.map(String)}
+                  />
+                </FilterControl>
+                <FilterControl label="Lista">
+                  <FilterSelect
+                    value={list}
+                    change={setList}
+                    all="Todas"
+                    label="Todas las listas"
+                    items={customLists}
+                  />
+                </FilterControl>
+                <FilterControl label="Duración estimada">
+                  <FilterSelect
+                    value={duration}
+                    change={setDuration}
+                    all="Todas"
+                    label="Cualquier duración"
+                    items={["20", "50", "100"]}
+                    labels={{
+                      "20": "Hasta 20 horas",
+                      "50": "Hasta 50 horas",
+                      "100": "Hasta 100 horas",
+                    }}
+                  />
+                </FilterControl>
+                <FilterControl label="Dificultad">
+                  <FilterSelect
+                    value={difficulty}
+                    change={setDifficulty}
+                    all="Todas"
+                    label="Cualquier dificultad"
+                    items={["Fácil", "Normal", "Difícil", "Muy difícil", "Sin indicar"]}
+                  />
+                </FilterControl>
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/8 pt-3 text-sm">
+              <span className="text-slate-400">
+                Mostrando <strong className="text-slate-200">{filtered.length}</strong> de {games.length} juegos
+              </span>
+              {(query || tab !== "Todos" || advancedFilterCount > 0 || sort !== "updated") && (
+                <Button variant="ghost" size="sm" onClick={resetFilters}>
+                  Limpiar búsqueda y filtros
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Collection Presentation Header */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold">Vista de la biblioteca</h2>
+              <p className="text-xs text-slate-500">
+                Cambia la presentación sin perder tu búsqueda ni tus filtros.
+              </p>
+            </div>
+            <ViewSwitcher value={viewMode} change={setViewMode} />
+          </div>
+
+          {/* Games Display */}
+          {loading ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <Skeleton key={i} className="h-96 rounded-3xl bg-white/5" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <Empty hasGames={!!games.length} reset={resetFilters} add={openNew} />
+          ) : (
+            <GameCollectionView
+              games={filtered}
+              mode={viewMode}
+              settings={settings}
+              view={setSelectedGame}
+              edit={openEdit}
+              remove={remove}
+              quickSession={game =>
+                addSession(game, {
+                  date: new Date().toISOString().slice(0, 10),
+                  hours: Math.round(settings.quickSessionMinutes / 6) / 10,
+                  note: "Registro rápido",
+                })
+              }
+              advance={game => {
+                const progress = Math.min(100, game.progress + settings.quickProgress);
+                return quickUpdate(
+                  game,
+                  {
+                    progress,
+                    ...(settings.autoFinishAt100 && progress === 100
+                      ? { status: "Terminado", finishedAt: new Date().toISOString().slice(0, 10) }
+                      : {}),
+                  },
+                  "Progreso actualizado"
+                );
+              }}
+              finish={game =>
+                quickUpdate(
+                  game,
+                  {
+                    status: "Terminado",
+                    progress: 100,
+                    finishedAt: new Date().toISOString().slice(0, 10),
+                  },
+                  "Juego marcado como terminado"
+                )
+              }
+              favorite={game =>
+                quickUpdate(
+                  game,
+                  {
+                    lists: (game.lists ?? []).includes("Favoritos")
+                      ? (game.lists ?? []).filter(item => item !== "Favoritos")
+                      : [...(game.lists ?? []), "Favoritos"],
+                  },
+                  (game.lists ?? []).includes("Favoritos") ? "Quitado de favoritos" : "Añadido a favoritos"
+                )
+              }
+            />
+          )}
+        </section>
+
+        {/* Sidebar */}
+        <aside className="space-y-5">
+          {/* Platform distribution */}
+          <div className="rounded-3xl border border-white/8 bg-white/[.04] p-5">
+            <div className="flex items-center gap-2">
+              <Gamepad2 className="size-5 text-cyan-300" />
+              <h2 className="font-bold">Por plataforma</h2>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Selecciona una plataforma para filtrar la biblioteca.
+            </p>
+            {platform !== "Todas" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2 -ml-2 text-violet-300"
+                onClick={() => setPlatform("Todas")}
+              >
+                Ver todas
+              </Button>
+            )}
+            {consoleStats.length ? (
+              <div className="mt-4 space-y-2">
+                {consoleStats.map(({ p, n }) => (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      setPlatform(p);
+                      setFiltersOpen(true);
+                    }}
+                    aria-pressed={platform === p}
+                    className={`block w-full rounded-xl border p-3 text-left transition ${
+                      platform === p
+                        ? "border-violet-400/35 bg-violet-500/12"
+                        : "border-transparent hover:border-white/8 hover:bg-white/[.04]"
+                    }`}
+                  >
+                    <div className="mb-1.5 flex justify-between text-sm">
+                      <span className="font-medium">{p}</span>
+                      <span className="text-slate-400">
+                        {n} juego{n !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${color[p] ?? color.Otra}`}
+                        style={{ width: `${Math.max(10, (n / Math.max(stats.total, 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-400">Aquí aparecerá la distribución de tu colección.</p>
+            )}
+          </div>
+
+          {/* Focus Goals Banner */}
+          <div className="rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-500/15 to-cyan-400/10 p-5">
+            <div className="mb-3 grid size-10 place-items-center rounded-xl bg-violet-400/15 text-violet-300">
+              <Target />
+            </div>
+            <h2 className="font-bold">Tu enfoque</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Tu meta es mantener como máximo {goals.activeLimit} partidas activas.
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-cyan-300">
+              {stats.active <= goals.activeLimit ? (
+                <>
+                  <Check className="size-4" />
+                  Vas bien: {stats.active} activas
+                </>
+              ) : (
+                <>Tienes {stats.active} activas</>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 -ml-2 text-violet-300"
+              onClick={() => setGoalsDialog(true)}
+            >
+              Editar metas
+              <ChevronRight />
+            </Button>
+          </div>
+
+          <AlertsPanel
+            games={games}
+            activeLimit={goals.activeLimit}
+            inactivityDays={settings.inactivityDays}
+            view={game => setSelectedGame(game)}
+          />
+        </aside>
+      </main>
+
+      <input
+        ref={backupInput}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={event => {
+          const file = event.target.files?.[0];
+          if (file) void restoreBackup(file);
+        }}
+      />
+
+      {/* Dialog Modals */}
+      {settingsDialog && (
+        <SettingsDialog
+          settings={settings}
+          setOpen={setSettingsDialog}
+          save={saveSettings}
+          exportJson={() => downloadBackup("json")}
+          exportCsv={() => downloadBackup("csv")}
+          restore={() => backupInput.current?.click()}
+          importing={importing}
+        />
+      )}
+
+      {catalogDialog && (
+        <CatalogDialog
+          games={games}
+          settings={settings}
+          setOpen={setCatalogDialog}
+          addGames={addCatalogGames}
+        />
+      )}
+
+      {goalsDialog && (
+        <GoalsDialog goals={goals} games={games} setOpen={setGoalsDialog} save={saveGoals} />
+      )}
+
+      <StatsDialog open={statsDialog} setOpen={setStatsDialog} games={games} />
+
+      <RandomPicker
+        open={randomDialog}
+        setOpen={setRandomDialog}
+        games={games}
+        view={game => {
+          setRandomDialog(false);
+          setSelectedGame(game);
+        }}
+      />
+
+      {selectedGame && (
+        <GameDetails
+          game={selectedGame}
+          setOpen={open => {
+            if (!open) setSelectedGame(null);
+          }}
+          edit={() => {
+            setSelectedGame(null);
+            openEdit(selectedGame);
+          }}
+          addSession={session => addSession(selectedGame, session)}
+        />
+      )}
+
+      <GameDialog
+        settings={settings}
+        open={dialog}
+        setOpen={setDialog}
+        draft={draft}
+        setDraft={setDraft}
+        editing={!!editing}
+        editingId={editing?.id}
+        save={save}
+        saving={saving}
+        games={games}
+      />
+
+      {user && (
+        <ShareDialog
+          open={shareOpen}
+          setOpen={setShareOpen}
+          userId={user.uid}
+          defaultHandle={user.displayName || "Gamer"}
+          games={games}
+          db={db}
+          savedSettings={publicProfileSettings}
+          onSettingsUpdated={setPublicProfileSettings}
+          onPreviewPublic={() => setPublicViewUid(user.uid)}
+        />
+      )}
+
+      <ProfilesDialog
+        open={profilesDialogOpen}
+        setOpen={setProfilesDialogOpen}
+        userId={user?.uid}
+        userName={profileName}
+        publicSettings={publicProfileSettings}
+        onViewMyProfile={() => user && setPublicViewUid(user.uid)}
+        onOpenShareSettings={() => setShareOpen(true)}
+        onLoadProfile={uid => setPublicViewUid(uid)}
+      />
+    </div>
   );
-  const profileName=user.displayName?.trim()||user.email?.split("@")[0]||"Jugador",profileInitials=profileName.split(/\s+/).slice(0,2).map(part=>part[0]).join("").toUpperCase();
-
-  return <div className="min-h-screen bg-[#07101f] text-slate-100"><Toaster position="top-right" richColors/>
-    <header className="sticky top-0 z-30 border-b border-white/8 bg-[#07101f]/95 backdrop-blur-xl"><div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 py-3 lg:px-8"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-[0_0_28px_rgba(139,92,246,.3)]"><Gamepad2 className="size-5"/></div><div><div className="font-black tracking-tight">MI BÓVEDA</div><div className="-mt-1 text-[10px] font-bold tracking-[.22em] text-cyan-300">GAMER</div></div></div><nav aria-label="Navegación principal" className="order-3 flex w-full gap-1 rounded-xl bg-white/[.04] p-1 md:order-none md:ml-5 md:w-auto"><Button variant="ghost" className="flex-1 bg-white/8 text-white md:flex-none"><Library/>Biblioteca</Button><Button variant="ghost" className="flex-1 text-slate-300 hover:text-white md:flex-none" onClick={()=>setCatalogDialog(true)}><Compass/>Descubrir juegos</Button><Button variant="ghost" className="flex-1 text-slate-300 hover:text-white md:flex-none" onClick={()=>setProfilesDialogOpen(true)}><Globe className="mr-1.5 size-4 text-cyan-300"/>Ver perfiles</Button></nav><div className="ml-auto flex items-center gap-2"><Button variant="outline" className="border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20" onClick={()=>setShareOpen(true)} title="Compartir colección"><Share2 className="mr-1.5 size-4 text-cyan-300"/><span>Compartir</span></Button><Button className="bg-violet-500 text-white hover:bg-violet-400" onClick={openNew} aria-label="Añadir juego" title="Añadir juego"><Plus/><span className="hidden sm:inline">Añadir juego</span></Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="h-11 gap-2 rounded-xl px-2" aria-label={`Abrir menú de perfil de ${profileName}`}><Avatar size="lg" className="border border-white/15"><AvatarImage src={user.photoURL??undefined} alt={profileName}/><AvatarFallback className="bg-violet-500/20 font-bold text-violet-200">{profileInitials}</AvatarFallback></Avatar><span className="hidden max-w-32 truncate text-left text-sm font-semibold sm:block">{profileName}</span><ChevronDown className="size-4 text-slate-500"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-72 border-white/10 bg-[#0b1628] p-2 text-slate-100"><DropdownMenuLabel className="flex items-center gap-3 px-2 py-3"><Avatar size="lg"><AvatarImage src={user.photoURL??undefined} alt={profileName}/><AvatarFallback className="bg-violet-500/20 text-violet-200">{profileInitials}</AvatarFallback></Avatar><span className="min-w-0"><span className="block truncate font-semibold">{profileName}</span><span className="block truncate text-xs font-normal text-slate-400">{user.email}</span></span></DropdownMenuLabel><DropdownMenuSeparator className="bg-white/10"/><DropdownMenuItem onClick={()=>setPublicViewUid(user.uid)}><Eye/>Ver mi perfil público</DropdownMenuItem><DropdownMenuItem onClick={()=>setProfilesDialogOpen(true)}><Globe/>Ver perfiles públicos</DropdownMenuItem><DropdownMenuItem onClick={()=>setShareOpen(true)}><Share2/>Compartir colección</DropdownMenuItem><DropdownMenuItem onClick={()=>setSettingsDialog(true)}><Settings2/>Configuración</DropdownMenuItem><DropdownMenuItem onClick={()=>setGoalsDialog(true)}><Target/>Metas personales</DropdownMenuItem><DropdownMenuItem onClick={()=>setStatsDialog(true)}><BarChart3/>Estadísticas</DropdownMenuItem><DropdownMenuItem onClick={()=>setRandomDialog(true)}><Dices/>¿Qué juego hoy?</DropdownMenuItem><DropdownMenuSeparator className="bg-white/10"/><DropdownMenuItem onClick={()=>downloadBackup("json")}><FileJson/>Exportar copia JSON</DropdownMenuItem><DropdownMenuItem onClick={()=>downloadBackup("csv")}><Download/>Exportar lista CSV</DropdownMenuItem><DropdownMenuItem onClick={()=>backupInput.current?.click()} disabled={importing}><Upload/>{importing?"Importando…":"Restaurar copia"}</DropdownMenuItem>{installPrompt&&<><DropdownMenuSeparator className="bg-white/10"/><DropdownMenuItem onClick={installApp}><Download/>Instalar aplicación</DropdownMenuItem></>}<DropdownMenuSeparator className="bg-white/10"/><DropdownMenuItem onClick={logout} variant="destructive"><LogOut/>Cerrar sesión</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div></header>
-    <main className="mx-auto grid max-w-[1500px] gap-7 px-4 py-7 lg:grid-cols-[minmax(0,1fr)_310px] lg:px-8"><section className="min-w-0">
-      <div className="mb-7 flex flex-col justify-between gap-5 xl:flex-row xl:items-end"><div><p className="mb-2 text-sm font-semibold text-cyan-300">Biblioteca personal</p><h1 className="text-3xl font-black tracking-[-.04em] sm:text-4xl">Mis juegos</h1><p className="mt-2 text-slate-400">Consulta, organiza y continúa tus partidas desde un solo lugar.</p></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{statItems.map(({Icon,label,value})=><div key={label} className="min-w-[110px] rounded-2xl border border-white/8 bg-white/[.045] px-3 py-3"><div className="flex items-center gap-2 text-xs text-slate-400"><Icon className="size-4 text-cyan-300"/>{label}</div><div className="mt-1 text-2xl font-black">{value}</div></div>)}</div></div>
-      <div className="mb-5 rounded-2xl border border-white/8 bg-white/[.035] p-4"><div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_190px_220px_auto]"><FilterControl label="Buscar en mi biblioteca"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500"/><Input aria-label="Buscar en mi biblioteca" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Título, saga, género…" className="border-white/8 bg-[#07101f] pl-10"/></div></FilterControl><FilterControl label="Estado"><FilterSelect value={tab} change={setTab} all="Todos" label="Todos los estados" items={statuses}/></FilterControl><FilterControl label="Ordenar por"><Select value={sort} onValueChange={setSort}><SelectTrigger className="w-full border-white/8 bg-[#07101f]"><ListFilter/><SelectValue/></SelectTrigger><SelectContent><SelectItem value="updated">Actualizados recientemente</SelectItem><SelectItem value="title">Título A–Z</SelectItem><SelectItem value="progress">Mayor progreso</SelectItem><SelectItem value="hours">Más horas jugadas</SelectItem><SelectItem value="release">Lanzamiento más reciente</SelectItem></SelectContent></Select></FilterControl><div className="flex items-end"><Button variant="outline" className="w-full" onClick={()=>setFiltersOpen(open=>!open)} aria-expanded={filtersOpen}><SlidersHorizontal/>Más filtros{advancedFilterCount>0&&<Badge className="bg-violet-500 text-white">{advancedFilterCount}</Badge>}</Button></div></div>{filtersOpen&&<div className="mt-4 grid gap-3 border-t border-white/8 pt-4 sm:grid-cols-2 xl:grid-cols-4"><FilterControl label="Plataforma"><FilterSelect value={platform} change={setPlatform} all="Todas" label="Todas las plataformas" items={platforms}/></FilterControl><FilterControl label="Género"><FilterSelect value={genre} change={setGenre} all="Todos" label="Todos los géneros" items={genres}/></FilterControl><FilterControl label="Saga"><FilterSelect value={series} change={setSeries} all="Todas" label="Todas las sagas" items={seriesOptions}/></FilterControl><FilterControl label="Prioridad"><FilterSelect value={priority} change={setPriority} all="Todas" label="Todas las prioridades" items={["Alta","Normal","Baja"]}/></FilterControl><FilterControl label="Año"><FilterSelect value={year} change={setYear} all="Todos" label="Todos los años" items={years.map(String)}/></FilterControl><FilterControl label="Lista"><FilterSelect value={list} change={setList} all="Todas" label="Todas las listas" items={customLists}/></FilterControl><FilterControl label="Duración estimada"><FilterSelect value={duration} change={setDuration} all="Todas" label="Cualquier duración" items={["20","50","100"]} labels={{"20":"Hasta 20 horas","50":"Hasta 50 horas","100":"Hasta 100 horas"}}/></FilterControl><FilterControl label="Dificultad"><FilterSelect value={difficulty} change={setDifficulty} all="Todas" label="Cualquier dificultad" items={["Fácil","Normal","Difícil","Muy difícil","Sin indicar"]}/></FilterControl></div>}<div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/8 pt-3 text-sm"><span className="text-slate-400">Mostrando <strong className="text-slate-200">{filtered.length}</strong> de {games.length} juegos</span>{(query||tab!=="Todos"||advancedFilterCount>0||sort!=="updated")&&<Button variant="ghost" size="sm" onClick={resetFilters}>Limpiar búsqueda y filtros</Button>}</div></div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold">Vista de la biblioteca</h2><p className="text-xs text-slate-500">Cambia la presentación sin perder tu búsqueda ni tus filtros.</p></div><ViewSwitcher value={viewMode} change={setViewMode}/></div>{loading?<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1,2,3,4,5,6].map(i=><Skeleton key={i} className="h-96 rounded-3xl bg-white/5"/>)}</div>:filtered.length===0?<Empty hasGames={!!games.length} reset={resetFilters} add={openNew}/>:<GameCollectionView games={filtered} mode={viewMode} settings={settings} view={setSelectedGame} edit={openEdit} remove={remove} quickSession={game=>addSession(game,{date:new Date().toISOString().slice(0,10),hours:Math.round(settings.quickSessionMinutes/6)/10,note:"Registro rápido"})} advance={game=>{const progress=Math.min(100,game.progress+settings.quickProgress);return quickUpdate(game,{progress,...(settings.autoFinishAt100&&progress===100?{status:"Terminado",finishedAt:new Date().toISOString().slice(0,10)}:{})},"Progreso actualizado")}} finish={game=>quickUpdate(game,{status:"Terminado",progress:100,finishedAt:new Date().toISOString().slice(0,10)},"Juego marcado como terminado")} favorite={game=>quickUpdate(game,{lists:(game.lists??[]).includes("Favoritos")?(game.lists??[]).filter(item=>item!=="Favoritos"):[...(game.lists??[]),"Favoritos"]},(game.lists??[]).includes("Favoritos")?"Quitado de favoritos":"Añadido a favoritos")}/>}
-    </section><aside className="space-y-5"><div className="rounded-3xl border border-white/8 bg-white/[.04] p-5"><div className="flex items-center gap-2"><Gamepad2 className="size-5 text-cyan-300"/><h2 className="font-bold">Por plataforma</h2></div><p className="mt-1 text-xs leading-5 text-slate-500">Selecciona una plataforma para filtrar la biblioteca.</p>{platform!=="Todas"&&<Button variant="ghost" size="sm" className="mt-2 -ml-2 text-violet-300" onClick={()=>setPlatform("Todas")}>Ver todas</Button>}{consoleStats.length?<div className="mt-4 space-y-2">{consoleStats.map(({p,n})=><button key={p} onClick={()=>{setPlatform(p);setFiltersOpen(true)}} aria-pressed={platform===p} className={`block w-full rounded-xl border p-3 text-left transition ${platform===p?"border-violet-400/35 bg-violet-500/12":"border-transparent hover:border-white/8 hover:bg-white/[.04]"}`}><div className="mb-1.5 flex justify-between text-sm"><span className="font-medium">{p}</span><span className="text-slate-400">{n} juego{n!==1?"s":""}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/8"><div className={`h-full rounded-full bg-gradient-to-r ${color[p]??color.Otra}`} style={{width:`${Math.max(10,n/Math.max(stats.total,1)*100)}%`}}/></div></button>)}</div>:<p className="mt-4 text-sm text-slate-400">Aquí aparecerá la distribución de tu colección.</p>}</div><div className="rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-500/15 to-cyan-400/10 p-5"><div className="mb-3 grid size-10 place-items-center rounded-xl bg-violet-400/15 text-violet-300"><Target/></div><h2 className="font-bold">Tu enfoque</h2><p className="mt-2 text-sm leading-6 text-slate-300">Tu meta es mantener como máximo {goals.activeLimit} partidas activas.</p><div className="mt-4 flex items-center gap-2 text-sm font-semibold text-cyan-300">{stats.active<=goals.activeLimit?<><Check className="size-4"/>Vas bien: {stats.active} activas</>:<>Tienes {stats.active} activas</>}</div><Button variant="ghost" size="sm" className="mt-2 -ml-2 text-violet-300" onClick={()=>setGoalsDialog(true)}>Editar metas<ChevronRight/></Button></div><AlertsPanel games={games} activeLimit={goals.activeLimit} inactivityDays={settings.inactivityDays} view={game=>setSelectedGame(game)}/></aside></main>
-    <input ref={backupInput} type="file" accept="application/json,.json" className="hidden" onChange={event=>{const file=event.target.files?.[0];if(file)void restoreBackup(file)}}/>
-    {settingsDialog&&<SettingsDialog settings={settings} setOpen={setSettingsDialog} save={saveSettings} exportJson={()=>downloadBackup("json")} exportCsv={()=>downloadBackup("csv")} restore={()=>backupInput.current?.click()} importing={importing}/>}{catalogDialog&&<CatalogDialog games={games} settings={settings} setOpen={setCatalogDialog} addGames={addCatalogGames}/>} {goalsDialog&&<GoalsDialog goals={goals} games={games} setOpen={setGoalsDialog} save={saveGoals}/>}<StatsDialog open={statsDialog} setOpen={setStatsDialog} games={games}/><RandomPicker open={randomDialog} setOpen={setRandomDialog} games={games} view={game=>{setRandomDialog(false);setSelectedGame(game)}}/>{selectedGame&&<GameDetails game={selectedGame} setOpen={open=>{if(!open)setSelectedGame(null)}} edit={()=>{setSelectedGame(null);openEdit(selectedGame)}} addSession={session=>addSession(selectedGame,session)}/>}<GameDialog settings={settings} open={dialog} setOpen={setDialog} draft={draft} setDraft={setDraft} editing={!!editing} editingId={editing?.id} save={save} saving={saving} games={games}/>
-    {user&&<ShareDialog open={shareOpen} setOpen={setShareOpen} userId={user.uid} defaultHandle={user.displayName||"Gamer"} games={games} db={db} savedSettings={publicProfileSettings} onSettingsUpdated={setPublicProfileSettings} onPreviewPublic={()=>setPublicViewUid(user.uid)}/>}
-    <ProfilesDialog open={profilesDialogOpen} setOpen={setProfilesDialogOpen} userId={user?.uid} userName={profileName} publicSettings={publicProfileSettings} onViewMyProfile={()=>user&&setPublicViewUid(user.uid)} onOpenShareSettings={()=>setShareOpen(true)} onLoadProfile={uid=>setPublicViewUid(uid)}/>
-  </div>
 }
 
-function SignIn({onSignIn,signingIn,onOpenProfiles}:{onSignIn:()=>void;signingIn:boolean;onOpenProfiles:()=>void}){return <main className="grid min-h-screen place-items-center bg-[#07101f] p-6 text-slate-100"><div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[.045] p-8 text-center shadow-2xl"><div className="mx-auto mb-5 grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-[0_0_32px_rgba(139,92,246,.3)]"><Gamepad2 className="size-8"/></div><h1 className="text-3xl font-black tracking-tight">Mi Bóveda Gamer</h1><p className="mt-3 leading-7 text-slate-400">Inicia sesión para acceder a tu colección. Tus juegos y tu progreso se guardan de forma privada en Google Cloud.</p><Button className="mt-7 w-full bg-violet-500 text-white hover:bg-violet-400" onClick={onSignIn} disabled={signingIn}><LogIn/>{signingIn?"Conectando con Google…":"Continuar con Google"}</Button><div className="mt-6 border-t border-white/10 pt-6 text-center"><p className="text-xs text-slate-400">¿Quieres ver la colección compartida de un amigo o consultar un perfil?</p><Button variant="outline" className="mt-3 w-full border-cyan-400/30 bg-cyan-500/5 text-cyan-300 hover:bg-cyan-500/15" onClick={onOpenProfiles}><Globe className="mr-2 size-4 text-cyan-300"/>Ver perfiles públicos</Button></div></div></main>}
-function SetupNotice(){return <main className="grid min-h-screen place-items-center bg-[#07101f] p-6 text-slate-100"><div className="max-w-lg rounded-3xl border border-amber-400/20 bg-amber-400/5 p-8"><h1 className="text-2xl font-black">Falta conectar Google Cloud</h1><p className="mt-3 leading-7 text-slate-300">La aplicación está lista. Añade la configuración pública de Firebase para activar el inicio de sesión y la base de datos.</p></div></main>}
-
-function GameCard({game,settings,view,edit,remove,quickSession,advance,finish,favorite}:{game:Game;settings:AppSettings;view:()=>void;edit:()=>void;remove:()=>void;quickSession:()=>void;advance:()=>void;finish:()=>void;favorite:()=>void}){return <article className="group overflow-hidden rounded-3xl border border-white/8 bg-gradient-to-b from-white/[.065] to-white/[.025] transition hover:-translate-y-1 hover:border-violet-400/30"><button type="button" onClick={view} className="relative block aspect-[16/9] w-full overflow-hidden bg-[#0b1628] text-left">{game.coverUrl?<div role="img" aria-label={`Carátula de ${game.title}`} className="absolute inset-0 bg-cover bg-center transition duration-500 group-hover:scale-105" style={{backgroundImage:`linear-gradient(to top, rgba(7,16,31,.82), rgba(7,16,31,.06)), url(${JSON.stringify(game.coverUrl).slice(1,-1)})`}}/>:<div className={`grid h-full place-items-center bg-gradient-to-br ${color[game.platform]??color.Otra}`}><ImageIcon className="size-10 text-white/70"/></div>}<Badge className="absolute left-3 top-3 border-white/15 bg-black/55 text-white backdrop-blur">{game.source||"Manual"}</Badge><div className={`absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r ${color[game.platform]??color.Otra}`}/></button><div className="p-5"><div className="flex items-start gap-3"><div className={`grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br ${color[game.platform]??color.Otra} text-xs font-black`}>{game.platform.slice(0,3).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><button type="button" onClick={view} className="line-clamp-2 text-left font-bold leading-tight hover:text-violet-300">{game.title}</button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="-mr-2 -mt-2 text-slate-400"><MoreHorizontal/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={view}><Info/>Ver ficha</DropdownMenuItem><DropdownMenuItem onClick={quickSession}><Clock3/>Registrar {settings.quickSessionMinutes} minutos</DropdownMenuItem><DropdownMenuItem onClick={advance}><Zap/>Aumentar progreso {settings.quickProgress} %</DropdownMenuItem><DropdownMenuItem onClick={finish}><Trophy/>Marcar como terminado</DropdownMenuItem><DropdownMenuItem onClick={favorite}><Heart/>{(game.lists??[]).includes("Favoritos")?"Quitar de favoritos":"Añadir a favoritos"}</DropdownMenuItem><DropdownMenuItem onClick={edit}><Pencil/>Editar</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={remove}><Trash2/>Eliminar</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div><div className="mt-1 text-sm text-slate-400">{game.platform} · {game.format}</div></div></div><div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">{game.genre&&<span className="rounded-full bg-white/7 px-2.5 py-1">{game.genre}</span>}{game.releaseYear>0&&<span className="rounded-full bg-white/7 px-2.5 py-1">{game.releaseYear}</span>}{game.developer&&<span className="max-w-full truncate rounded-full bg-white/7 px-2.5 py-1">{game.developer}</span>}</div><div className="mt-4 flex items-center justify-between"><div className="flex items-center gap-1.5"><Badge variant="outline" className={statusStyle[game.status]}>{game.status}</Badge>{game.isPrivate&&<Badge variant="outline" className="border-amber-400/30 bg-amber-400/10 text-amber-300"><Lock className="mr-1 size-3"/>Privado</Badge>}</div><span className="text-sm font-bold">{game.progress}%</span></div><Progress value={game.progress} className="mt-3 h-2 bg-white/8 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-violet-500 [&_[data-slot=progress-indicator]]:to-cyan-400"/><div className="mt-5 min-h-14 rounded-xl bg-black/20 p-3"><div className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-300"><Target className="size-3.5"/>Próximo objetivo</div><p className="line-clamp-2 text-sm text-slate-300">{game.nextGoal||"Añade una nota para recordar dónde continuar."}</p></div><div className="mt-4 flex items-center justify-between text-sm text-slate-400"><span className="flex items-center gap-1.5"><Clock3 className="size-4"/>{game.hours} h</span><Button variant="ghost" size="sm" className="-mr-2 text-violet-300" onClick={view}>Ver ficha<ChevronRight/></Button></div></div></article>}
-
-type CollectionViewProps={games:Game[];mode:ViewMode;settings:AppSettings;view:(game:Game)=>void;edit:(game:Game)=>void;remove:(game:Game)=>void;quickSession:(game:Game)=>void;advance:(game:Game)=>void;finish:(game:Game)=>void;favorite:(game:Game)=>void};
-function ViewSwitcher({value,change}:{value:ViewMode;change:(mode:ViewMode)=>void}){const options:Array<[ViewMode,string]>=[["cards","Tarjetas"],["list","Lista"],["covers","Carátulas"],["series","Sagas"]];return <div className="flex max-w-full overflow-x-auto rounded-xl border border-white/8 bg-[#0b1628] p-1" role="group" aria-label="Tipo de visualización">{options.map(([mode,label])=><button type="button" key={mode} aria-pressed={value===mode} onClick={()=>change(mode)} className={`min-w-max rounded-lg px-3 py-2 text-sm font-medium transition ${value===mode?"bg-violet-500 text-white shadow":"text-slate-400 hover:bg-white/5 hover:text-white"}`}>{label}</button>)}</div>}
-function GameCollectionView(props:CollectionViewProps){const {games,mode,settings}=props;if(mode==="cards")return <div className={`grid gap-4 ${settings.density==="compact"?"md:grid-cols-3 xl:grid-cols-4":"md:grid-cols-2 xl:grid-cols-3"}`}>{games.map(game=><GameCard key={game.id} game={game} settings={settings} view={()=>props.view(game)} edit={()=>props.edit(game)} remove={()=>props.remove(game)} quickSession={()=>props.quickSession(game)} advance={()=>props.advance(game)} finish={()=>props.finish(game)} favorite={()=>props.favorite(game)}/>)}</div>;if(mode==="list")return <div className="space-y-2">{games.map(game=><GameListRow key={game.id} game={game} {...props} compact={settings.density==="compact"}/>)}</div>;if(mode==="covers")return <div className={`grid grid-cols-2 gap-3 ${settings.coverSize==="small"?"sm:grid-cols-4 xl:grid-cols-6":settings.coverSize==="large"?"sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4":"sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>{games.map(game=><GameCoverTile key={game.id} game={game} {...props}/>)}</div>;const groups=new Map<string,Game[]>();games.forEach(game=>{const name=game.series.trim()||"Sin saga";groups.set(name,[...(groups.get(name)??[]),game])});const ordered=[...groups].sort(([a],[b])=>a==="Sin saga"?1:b==="Sin saga"?-1:a.localeCompare(b,"es"));return <div className="space-y-5">{ordered.map(([name,items])=><section key={name} className="overflow-hidden rounded-2xl border border-white/8 bg-white/[.025]"><header className="flex items-center justify-between border-b border-white/8 px-4 py-3"><div><h3 className="font-bold">{name}</h3><p className="text-xs text-slate-500">{items.length} título{items.length===1?"":"s"}</p></div><Badge variant="secondary">Saga</Badge></header><div className="divide-y divide-white/7">{items.map(game=><GameListRow key={game.id} game={game} {...props} compact/>)}</div></section>)}</div>}
-function GameListRow({game,settings,view,edit,remove,quickSession,advance,finish,favorite,compact}:{game:Game;compact?:boolean}&Omit<CollectionViewProps,"games"|"mode">){return <article className={`grid items-center gap-3 bg-white/[.025] p-3 transition hover:bg-white/[.05] ${compact?"grid-cols-[48px_minmax(0,1fr)_auto]":"grid-cols-[64px_minmax(0,1fr)_auto] rounded-2xl border border-white/8"}`}><button type="button" onClick={()=>view(game)} aria-label={`Abrir ${game.title}`} className={`${compact?"size-12":"size-16"} overflow-hidden rounded-xl bg-[#0b1628]`}>{game.coverUrl?<span role="img" aria-label="" className="block size-full bg-cover bg-center" style={{backgroundImage:`url(${JSON.stringify(game.coverUrl).slice(1,-1)})`}}/>:<span className={`grid size-full place-items-center bg-gradient-to-br ${color[game.platform]??color.Otra}`}><Gamepad2 className="size-5"/></span>}</button><button type="button" onClick={()=>view(game)} className="min-w-0 text-left"><span className="block truncate font-semibold hover:text-violet-300">{game.title}</span><span className="mt-1 block truncate text-xs text-slate-400">{game.platform} · {game.genre||"Sin género"}{game.releaseYear?` · ${game.releaseYear}`:""}</span>{!compact&&<span className="mt-2 flex items-center gap-2"><Progress value={game.progress} className="h-1.5 max-w-40 flex-1 bg-white/8 [&_[data-slot=progress-indicator]]:bg-violet-500"/><span className="text-xs font-semibold text-slate-400">{game.progress}%</span></span>}</button><div className="flex items-center gap-2">{game.isPrivate&&<Badge variant="outline" className="border-amber-400/30 bg-amber-400/10 text-amber-300"><Lock className="mr-1 size-3"/>Privado</Badge>}<Badge variant="outline" className={`hidden sm:inline-flex ${statusStyle[game.status]}`}>{game.status}</Badge><GameActionMenu game={game} settings={settings} view={view} edit={edit} remove={remove} quickSession={quickSession} advance={advance} finish={finish} favorite={favorite}/></div></article>}
-function GameCoverTile({game,settings,view,edit,remove,quickSession,advance,finish,favorite}:{game:Game}&Omit<CollectionViewProps,"games"|"mode">){return <article className="group relative overflow-hidden rounded-2xl border border-white/8 bg-white/[.035]"><button type="button" onClick={()=>view(game)} className="relative block aspect-[3/4] w-full overflow-hidden text-left">{game.coverUrl?<span role="img" aria-label={`Carátula de ${game.title}`} className="absolute inset-0 bg-cover bg-center transition duration-500 group-hover:scale-105" style={{backgroundImage:`linear-gradient(to top, rgba(7,16,31,.98) 3%, rgba(7,16,31,.15) 70%), url(${JSON.stringify(game.coverUrl).slice(1,-1)})`}}/>:<span className={`absolute inset-0 grid place-items-center bg-gradient-to-br ${color[game.platform]??color.Otra}`}><Gamepad2 className="size-10 text-white/70"/></span>}<span className="absolute inset-x-0 bottom-0 p-3"><span className="line-clamp-2 block font-bold leading-tight">{game.title}</span><span className="mt-1 block text-xs text-slate-300">{game.platform} · {game.progress}%</span></span></button><div className="absolute right-2 top-2"><GameActionMenu game={game} settings={settings} view={view} edit={edit} remove={remove} quickSession={quickSession} advance={advance} finish={finish} favorite={favorite}/></div></article>}
-function GameActionMenu({game,settings,view,edit,remove,quickSession,advance,finish,favorite}:{game:Game}&Omit<CollectionViewProps,"games"|"mode">){return <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="size-9 border-white/10 bg-[#07101f]/85 text-slate-300 backdrop-blur" aria-label={`Acciones para ${game.title}`}><MoreHorizontal/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={()=>view(game)}><Info/>Ver ficha</DropdownMenuItem><DropdownMenuItem onClick={()=>quickSession(game)}><Clock3/>Registrar {settings.quickSessionMinutes} minutos</DropdownMenuItem><DropdownMenuItem onClick={()=>advance(game)}><Zap/>Aumentar progreso {settings.quickProgress} %</DropdownMenuItem><DropdownMenuItem onClick={()=>finish(game)}><Trophy/>Marcar como terminado</DropdownMenuItem><DropdownMenuItem onClick={()=>favorite(game)}><Heart/>{(game.lists??[]).includes("Favoritos")?"Quitar de favoritos":"Añadir a favoritos"}</DropdownMenuItem><DropdownMenuItem onClick={()=>edit(game)}><Pencil/>Editar</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={()=>remove(game)}><Trash2/>Eliminar</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
-
-function Empty({hasGames,reset,add}:{hasGames:boolean;reset:()=>void;add:()=>void}){return <div className="grid min-h-[370px] place-items-center rounded-3xl border border-dashed border-white/12 bg-white/[.025] p-8 text-center"><div><div className="mx-auto mb-4 grid size-16 place-items-center rounded-2xl bg-violet-500/15 text-violet-300"><Archive className="size-8"/></div><h2 className="text-xl font-bold">{hasGames?"No hay coincidencias":"Tu bóveda está lista"}</h2><p className="mx-auto mt-2 max-w-md text-slate-400">{hasGames?"Prueba otro filtro o una búsqueda diferente.":"Añade tu primer juego con su carátula y la información que te resulte útil. No cargamos contenido personal de ejemplo."}</p>{hasGames?<Button className="mt-5" variant="outline" onClick={reset}>Limpiar filtros</Button>:<Button className="mt-5 bg-violet-500" onClick={add}><Plus/>Añadir mi primer juego</Button>}</div></div>}
-
-function AlertsPanel({games,activeLimit,inactivityDays,view}:{games:Game[];activeLimit:number;inactivityDays:number;view:(game:Game)=>void}){const inactivityCutoff=new Date().getTime()-inactivityDays*24*60*60*1000,active=games.filter(game=>game.status==="Jugando"),inactive=active.filter(game=>{const latest=(game.sessions??[]).map(session=>new Date(`${session.date}T12:00:00`).getTime()).filter(Number.isFinite).sort((a,b)=>b-a)[0]??new Date(game.updatedAt).getTime();return Number.isFinite(latest)&&latest<inactivityCutoff});const alerts=[...(active.length>activeLimit?[{id:"focus",title:`${active.length} partidas activas`,text:`Superaste tu límite personal de ${activeLimit}.`,game:null}]:[]),...inactive.slice(0,3).map(game=>({id:game.id,title:`Retoma ${game.title}`,text:`Lleva más de ${inactivityDays} días sin actividad registrada.`,game}))];return <div className="rounded-3xl border border-amber-400/15 bg-amber-400/[.04] p-5"><div className="flex items-center gap-2"><Bell className="size-5 text-amber-300"/><h2 className="font-bold">Alertas</h2>{alerts.length>0&&<Badge className="ml-auto bg-amber-400/15 text-amber-200">{alerts.length}</Badge>}</div>{alerts.length?<div className="mt-4 space-y-2">{alerts.map(alert=><button type="button" key={alert.id} onClick={()=>alert.game&&view(alert.game)} className="block w-full rounded-xl bg-black/15 p-3 text-left transition hover:bg-white/5"><span className="block text-sm font-semibold text-amber-100">{alert.title}</span><span className="mt-1 block text-xs leading-5 text-slate-400">{alert.text}</span></button>)}</div>:<p className="mt-3 text-sm leading-6 text-slate-400">Sin alertas. Tus partidas activas están bajo control.</p>}</div>}
-
-function SettingsDialog({settings,setOpen,save,exportJson,exportCsv,restore,importing}:{settings:AppSettings;setOpen:(open:boolean)=>void;save:(settings:AppSettings)=>Promise<void>;exportJson:()=>void;exportCsv:()=>void;restore:()=>void;importing:boolean}){
-  const [draft,setDraft]=useState(settings),[section,setSection]=useState("appearance"),[saving,setSaving]=useState(false),sections=[["appearance","Apariencia"],["library","Biblioteca"],["import","Importación"],["sessions","Sesiones y alertas"],["data","Datos"]];async function submit(){setSaving(true);await save(draft);setSaving(false)}
-  return <Dialog open onOpenChange={setOpen}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-4xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 className="text-cyan-300"/>Configuración</DialogTitle><DialogDescription className="text-slate-400">Personaliza la bóveda. Tus preferencias se sincronizan con tu cuenta.</DialogDescription></DialogHeader><div className="grid gap-5 md:grid-cols-[190px_minmax(0,1fr)]"><nav className="flex gap-1 overflow-x-auto md:flex-col" aria-label="Secciones de configuración">{sections.map(([id,label])=><button type="button" key={id} onClick={()=>setSection(id)} className={`min-w-max rounded-xl px-3 py-2 text-left text-sm font-medium transition ${section===id?"bg-violet-500 text-white":"text-slate-400 hover:bg-white/5 hover:text-white"}`}>{label}</button>)}</nav><div className="min-h-80 rounded-2xl border border-white/8 bg-black/10 p-4">{section==="appearance"&&<SettingsSection title="Apariencia" description="Elige cómo quieres ver tu colección."><SettingsSelect label="Vista predeterminada" value={draft.defaultView} change={value=>setDraft({...draft,defaultView:value as ViewMode})} options={[["cards","Tarjetas"],["list","Lista"],["covers","Carátulas"],["series","Sagas"]]}/><SettingsSelect label="Densidad" value={draft.density} change={value=>setDraft({...draft,density:value as AppSettings["density"]})} options={[["comfortable","Cómoda"],["compact","Compacta"]]}/><SettingsSelect label="Tamaño de carátulas" value={draft.coverSize} change={value=>setDraft({...draft,coverSize:value as AppSettings["coverSize"]})} options={[["small","Pequeño"],["medium","Mediano"],["large","Grande"]]}/></SettingsSection>}{section==="library"&&<SettingsSection title="Biblioteca" description="Define los valores usados al crear y mostrar juegos."><SettingsSelect label="Estado predeterminado" value={draft.defaultStatus} change={value=>setDraft({...draft,defaultStatus:value})} options={statuses.map(value=>[value,value])}/><SettingsSelect label="Plataforma predeterminada" value={draft.defaultPlatform} change={value=>setDraft({...draft,defaultPlatform:value})} options={platforms.map(value=>[value,value])}/><SettingsSelect label="Formato predeterminado" value={draft.defaultFormat} change={value=>setDraft({...draft,defaultFormat:value})} options={[["Digital","Digital"],["Físico","Físico"]]}/><SettingsSelect label="Orden predeterminado" value={draft.defaultSort} change={value=>setDraft({...draft,defaultSort:value})} options={[["updated","Actualizados recientemente"],["title","Título A–Z"],["progress","Mayor progreso"],["hours","Más horas jugadas"],["release","Lanzamiento más reciente"]]}/><SwitchSetting label="Ocultar abandonados" description="No aparecen en la biblioteca salvo que desactives esta opción." checked={draft.hideAbandoned} change={checked=>setDraft({...draft,hideAbandoned:checked})}/><SwitchSetting label="Ocultar pendientes de compra" description="Mantiene la vista centrada en juegos que ya posees." checked={draft.hidePending} change={checked=>setDraft({...draft,hidePending:checked})}/><SwitchSetting label="Confirmar antes de eliminar" description="Recomendado para evitar eliminaciones accidentales." checked={draft.confirmDelete} change={checked=>setDraft({...draft,confirmDelete:checked})}/></SettingsSection>}{section==="import"&&<SettingsSection title="Importación y metadatos" description="Controla cómo se completan las fichas desde Wikidata."><SettingsSelect label="Idioma de metadatos" value={draft.metadataLanguage} change={value=>setDraft({...draft,metadataLanguage:value as "es"|"en"})} options={[["es","Español"],["en","Inglés"]]}/><SettingsSelect label="Plataforma si no se reconoce" value={draft.fallbackPlatform} change={value=>setDraft({...draft,fallbackPlatform:value})} options={platforms.map(value=>[value,value])}/><SwitchSetting label="Conservar datos escritos manualmente" description="Los metadatos solo completan campos vacíos." checked={draft.preserveManualData} change={checked=>setDraft({...draft,preserveManualData:checked})}/></SettingsSection>}{section==="sessions"&&<SettingsSection title="Sesiones y alertas" description="Personaliza las acciones rápidas y los recordatorios."><NumberSetting label="Duración del registro rápido" suffix="minutos" value={draft.quickSessionMinutes} min={5} max={240} change={value=>setDraft({...draft,quickSessionMinutes:value})}/><NumberSetting label="Incremento rápido de progreso" suffix="%" value={draft.quickProgress} min={1} max={50} change={value=>setDraft({...draft,quickProgress:value})}/><NumberSetting label="Avisar tras inactividad" suffix="días" value={draft.inactivityDays} min={1} max={365} change={value=>setDraft({...draft,inactivityDays:value})}/><SwitchSetting label="Terminar automáticamente al llegar al 100 %" description="Actualiza el estado y la fecha de finalización." checked={draft.autoFinishAt100} change={checked=>setDraft({...draft,autoFinishAt100:checked})}/></SettingsSection>}{section==="data"&&<SettingsSection title="Datos y copias" description="Descarga o restaura la información de tu bóveda."><div className="grid gap-3 sm:grid-cols-2"><Button variant="outline" onClick={exportJson}><FileJson/>Exportar copia completa</Button><Button variant="outline" onClick={exportCsv}><Download/>Exportar lista CSV</Button><Button variant="outline" onClick={restore} disabled={importing}><Upload/>{importing?"Importando…":"Restaurar copia JSON"}</Button></div><p className="text-sm leading-6 text-slate-500">Tus juegos, sesiones y preferencias se guardan de forma privada en Firebase bajo tu usuario.</p></SettingsSection>}</div></div><DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cancelar</Button><Button className="bg-violet-500" onClick={submit} disabled={saving}>{saving?"Guardando…":"Guardar configuración"}</Button></DialogFooter></DialogContent></Dialog>
+function FilterControl({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-semibold text-slate-400">{label}</Label>
+      {children}
+    </div>
+  );
 }
-function SettingsSection({title,description,children}:{title:string;description:string;children:ReactNode}){return <section className="space-y-4"><div><h3 className="text-lg font-bold">{title}</h3><p className="mt-1 text-sm text-slate-400">{description}</p></div><div className="grid gap-4 sm:grid-cols-2">{children}</div></section>}
-function SettingsSelect({label,value,change,options}:{label:string;value:string;change:(value:string)=>void;options:string[][]}){return <FilterControl label={label}><Select value={value} onValueChange={change}><SelectTrigger className="border-white/8 bg-[#07101f]"><SelectValue/></SelectTrigger><SelectContent>{options.map(([id,text])=><SelectItem key={id} value={id}>{text}</SelectItem>)}</SelectContent></Select></FilterControl>}
-function SwitchSetting({label,description,checked,change}:{label:string;description:string;checked:boolean;change:(checked:boolean)=>void}){return <div className="flex items-start justify-between gap-4 rounded-xl border border-white/8 bg-white/[.025] p-3 sm:col-span-2"><div><Label className="font-semibold">{label}</Label><p className="mt-1 text-xs leading-5 text-slate-500">{description}</p></div><Switch checked={checked} onCheckedChange={change} aria-label={label}/></div>}
-function NumberSetting({label,suffix,value,min,max,change}:{label:string;suffix:string;value:number;min:number;max:number;change:(value:number)=>void}){return <FilterControl label={label}><div className="flex items-center gap-2"><Input type="number" value={value} min={min} max={max} onChange={event=>change(Math.min(max,Math.max(min,Number(event.target.value))))}/><span className="text-sm text-slate-500">{suffix}</span></div></FilterControl>}
-
-function GoalsDialog({goals,games,setOpen,save}:{goals:Goals;games:Game[];setOpen:(open:boolean)=>void;save:(goals:Goals)=>Promise<void>}){const [draft,setDraft]=useState(goals),[saving,setSaving]=useState(false),year=String(new Date().getFullYear()),month=new Date().toISOString().slice(0,7),finished=games.filter(game=>game.finishedAt?.startsWith(year)&&["Terminado","Completado"].includes(game.status)).length,backlog=games.filter(game=>game.status==="Backlog").length,active=games.filter(game=>game.status==="Jugando").length,monthlyHours=Math.round(games.flatMap(game=>game.sessions??[]).filter(session=>session.date.startsWith(month)).reduce((sum,session)=>sum+session.hours,0)*10)/10;async function submit(){setSaving(true);await save(draft);setSaving(false)}return <Dialog open onOpenChange={setOpen}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Target className="text-cyan-300"/>Metas personales</DialogTitle><DialogDescription className="text-slate-400">Define objetivos medibles. El progreso se actualiza con tu biblioteca y tus sesiones.</DialogDescription></DialogHeader><div className="grid gap-3 sm:grid-cols-2"><GoalProgress label={`Juegos terminados en ${year}`} value={finished} target={draft.yearlyFinished}/><GoalProgress label="Horas jugadas este mes" value={monthlyHours} target={draft.monthlyHours}/><GoalProgress label="Backlog máximo" value={backlog} target={draft.backlogLimit} reverse/><GoalProgress label="Partidas activas máximas" value={active} target={draft.activeLimit} reverse/></div><div className="mt-3 grid gap-4 sm:grid-cols-2"><GoalField label="Juegos por terminar este año" value={draft.yearlyFinished} change={value=>setDraft({...draft,yearlyFinished:value})}/><GoalField label="Horas objetivo por mes" value={draft.monthlyHours} change={value=>setDraft({...draft,monthlyHours:value})}/><GoalField label="Límite de backlog" value={draft.backlogLimit} change={value=>setDraft({...draft,backlogLimit:value})}/><GoalField label="Límite de partidas activas" value={draft.activeLimit} change={value=>setDraft({...draft,activeLimit:value})}/></div><DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cancelar</Button><Button className="bg-violet-500" onClick={submit} disabled={saving}>{saving?"Guardando…":"Guardar metas"}</Button></DialogFooter></DialogContent></Dialog>}
-function GoalProgress({label,value,target,reverse}:{label:string;value:number;target:number;reverse?:boolean}){const achieved=reverse?value<=target:value>=target,percent=reverse?(value<=target?100:Math.max(0,target/value*100)):Math.min(100,value/Math.max(target,1)*100);return <div className={`rounded-2xl border p-4 ${achieved?"border-emerald-400/20 bg-emerald-400/8":"border-white/8 bg-white/[.03]"}`}><div className="flex justify-between gap-3 text-sm"><span>{label}</span>{achieved&&<Check className="size-4 text-emerald-300"/>}</div><div className="mt-2 text-2xl font-black">{value} <span className="text-sm font-normal text-slate-500">/ {target}</span></div><Progress value={percent} className="mt-3 h-2 bg-white/8 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-violet-500 [&_[data-slot=progress-indicator]]:to-cyan-400"/></div>}
-function GoalField({label,value,change}:{label:string;value:number;change:(value:number)=>void}){return <Field label={label}><Input type="number" min="1" value={value} onChange={event=>change(Math.max(1,Number(event.target.value)))}/></Field>}
-
-function StatsDialog({open,setOpen,games}:{open:boolean;setOpen:(open:boolean)=>void;games:Game[]}){
-  const platformData=useMemo(()=>platforms.map(name=>({name,value:games.filter(game=>game.platform===name).length})).filter(item=>item.value).sort((a,b)=>b.value-a.value),[games]);
-  const genreData=useMemo(()=>{const counts=new Map<string,number>();games.flatMap(game=>game.genre.split(",").map(value=>value.trim()).filter(Boolean)).forEach(value=>counts.set(value,(counts.get(value)??0)+1));return [...counts].map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,8)},[games]);
-  const monthData=useMemo(()=>{const formatter=new Intl.DateTimeFormat("es",{month:"short"});return Array.from({length:6},(_,index)=>{const date=new Date();date.setDate(1);date.setMonth(date.getMonth()-(5-index));const key=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`;return {name:formatter.format(date).replace(".",""),value:Math.round(games.flatMap(game=>game.sessions??[]).filter(session=>session.date.startsWith(key)).reduce((sum,session)=>sum+Number(session.hours||0),0)*10)/10}})},[games]);
-  const done=games.filter(game=>["Terminado","Completado"].includes(game.status)).length,completion=games.length?Math.round(done/games.length*100):0,currentYear=String(new Date().getFullYear()),finishedThisYear=games.filter(game=>typeof game.finishedAt==="string"&&game.finishedAt.startsWith(currentYear)&&["Terminado","Completado"].includes(game.status)).length;
-  const topSeries=useMemo(()=>{const hours=new Map<string,number>();games.filter(game=>game.series).forEach(game=>hours.set(game.series,(hours.get(game.series)??0)+game.hours));return [...hours].sort((a,b)=>b[1]-a[1])[0]},[games]);
-  const currentMonth=new Date().toISOString().slice(0,7),backlog=games.filter(game=>game.status==="Backlog").length,active=games.filter(game=>game.status==="Jugando").length,sessions=games.reduce((sum,game)=>sum+(game.sessions?.length??0),0),finishedThisMonth=games.filter(game=>game.finishedAt?.startsWith(currentMonth)&&["Terminado","Completado"].includes(game.status)).length;
-  const achievements=[{title:"Racha de victorias",detail:"Termina 3 juegos en un mes",earned:finishedThisMonth>=3},{title:"Backlog bajo control",detail:"Mantén 10 juegos o menos",earned:backlog<=10&&games.length>0},{title:"Enfoque maestro",detail:"Mantén un máximo de 5 partidas activas",earned:active<=5&&active>0},{title:"Cronista gamer",detail:"Registra 10 sesiones de juego",earned:sessions>=10}];
-  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-4xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><BarChart3 className="text-cyan-300"/>Estadísticas de tu bóveda</DialogTitle><DialogDescription className="text-slate-400">Un resumen calculado con tu colección y las sesiones registradas.</DialogDescription></DialogHeader><div className="grid gap-3 sm:grid-cols-3"><StatTile label="Biblioteca completada" value={`${completion}%`} detail={`${done} de ${games.length} juegos`}/><StatTile label={`Terminados en ${currentYear}`} value={String(finishedThisYear)} detail="Con fecha de finalización"/><StatTile label="Saga más jugada" value={topSeries?.[0]??"—"} detail={topSeries?`${topSeries[1]} horas acumuladas`:"Añade la saga a tus juegos"}/></div><div className="mt-3 grid gap-5 md:grid-cols-2"><StatsBlock title="Juegos por plataforma" data={platformData}/><StatsBlock title="Géneros principales" data={genreData}/><div className="md:col-span-2"><StatsBlock title="Backlog vs. juegos completados" data={[{name:"Backlog",value:backlog},{name:"Terminados y completados",value:done}]}/></div><div className="md:col-span-2 rounded-2xl border border-white/8 bg-white/[.03] p-4"><h3 className="font-bold">Horas registradas por mes</h3><p className="mt-1 text-xs text-slate-500">Solo incluye horas añadidas mediante el historial de sesiones.</p><div className="mt-5 flex h-40 items-end gap-3">{monthData.map(item=>{const max=Math.max(...monthData.map(value=>value.value),1);return <div key={item.name} className="flex h-full flex-1 flex-col items-center justify-end gap-2"><span className="text-xs font-semibold text-cyan-300">{item.value||""}</span><div className="w-full max-w-14 rounded-t-lg bg-gradient-to-t from-violet-500 to-cyan-400" style={{height:`${Math.max(item.value?8:2,item.value/max*100)}%`}}/><span className="text-xs capitalize text-slate-400">{item.name}</span></div>})}</div></div></div><div className="mt-5 rounded-2xl border border-white/8 bg-white/[.03] p-4"><div className="flex items-center gap-2"><Award className="size-5 text-amber-300"/><h3 className="font-bold">Logros personales</h3></div><div className="mt-4 grid gap-3 sm:grid-cols-2">{achievements.map(achievement=><div key={achievement.title} className={`rounded-xl border p-3 ${achievement.earned?"border-emerald-400/25 bg-emerald-400/10":"border-white/8 bg-black/10 opacity-60"}`}><div className="flex items-center gap-2"><Trophy className={`size-4 ${achievement.earned?"text-emerald-300":"text-slate-500"}`}/><span className="font-semibold">{achievement.title}</span>{achievement.earned&&<Badge className="ml-auto bg-emerald-400/15 text-emerald-200">Conseguido</Badge>}</div><p className="mt-1 text-xs text-slate-400">{achievement.detail}</p></div>)}</div></div><DialogFooter><Button onClick={()=>setOpen(false)}>Cerrar</Button></DialogFooter></DialogContent></Dialog>
-}
-function StatTile({label,value,detail}:{label:string;value:string;detail:string}){return <div className="rounded-2xl border border-white/8 bg-white/[.04] p-4"><p className="text-sm text-slate-400">{label}</p><p className="mt-2 truncate text-2xl font-black">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div>}
-function StatsBlock({title,data}:{title:string;data:{name:string;value:number}[]}){const max=Math.max(...data.map(item=>item.value),1);return <div className="rounded-2xl border border-white/8 bg-white/[.03] p-4"><h3 className="font-bold">{title}</h3>{data.length?<div className="mt-4 space-y-3">{data.map(item=><div key={item.name}><div className="mb-1 flex justify-between text-sm"><span className="truncate">{item.name}</span><span className="text-slate-400">{item.value}</span></div><div className="h-2 rounded-full bg-white/8"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400" style={{width:`${item.value/max*100}%`}}/></div></div>)}</div>:<p className="mt-4 text-sm text-slate-500">No hay datos todavía.</p>}</div>}
-
-function RandomPicker({open,setOpen,games,view}:{open:boolean;setOpen:(open:boolean)=>void;games:Game[];view:(game:Game)=>void}){
-  const [platform,setPlatform]=useState("Todas"),[genre,setGenre]=useState("Todos"),[duration,setDuration]=useState("Todas"),[choice,setChoice]=useState<Game|null>(null);
-  const genres=useMemo(()=>[...new Set(games.flatMap(game=>game.genre.split(",").map(value=>value.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,"es")),[games]);
-  const candidates=useMemo(()=>games.filter(game=>game.status==="Backlog"&&(platform==="Todas"||game.platform===platform)&&(genre==="Todos"||game.genre.split(",").map(value=>value.trim()).includes(genre))&&(duration==="Todas"||(game.estimatedHours>0&&game.estimatedHours<=Number(duration)))),[games,platform,genre,duration]);
-  const recommendation=useMemo(()=>{const played=games.filter(game=>(game.sessions?.length??0)>0),genreHours=new Map<string,number>(),platformHours=new Map<string,number>();played.forEach(game=>{const weight=Math.max(game.hours,1);game.genre.split(",").map(value=>value.trim()).filter(Boolean).forEach(value=>genreHours.set(value,(genreHours.get(value)??0)+weight));platformHours.set(game.platform,(platformHours.get(game.platform)??0)+weight)});const favoriteGenre=[...genreHours].sort((a,b)=>b[1]-a[1])[0]?.[0],favoritePlatform=[...platformHours].sort((a,b)=>b[1]-a[1])[0]?.[0],pool=games.filter(game=>["Jugando","Backlog"].includes(game.status)&&(platform==="Todas"||game.platform===platform)&&(genre==="Todos"||game.genre.includes(genre))&&(duration==="Todas"||(game.estimatedHours>0&&game.estimatedHours<=Number(duration))));const score=(game:Game)=>(game.status==="Jugando"?5:0)+(favoriteGenre&&game.genre.includes(favoriteGenre)?4:0)+(game.platform===favoritePlatform?3:0)+(game.priority==="Alta"?2:0)+game.progress/25;const game=[...pool].sort((a,b)=>score(b)-score(a))[0];return game?{game,reason:played.length?`Coincide con tus hábitos${favoriteGenre?` de ${favoriteGenre}`:""}${favoritePlatform?` en ${favoritePlatform}`:""}.`:"Empieza por una partida prioritaria de tu colección."}:null},[games,platform,genre,duration]);
-  function pick(){if(!candidates.length)return setChoice(null);setChoice(candidates[Math.floor(Math.random()*candidates.length)])}
-  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Dices className="text-violet-300"/>¿Qué juego hoy?</DialogTitle><DialogDescription className="text-slate-400">Elige al azar entre tus juegos del backlog. Los pausados y abandonados quedan fuera.</DialogDescription></DialogHeader><div className="grid gap-3 sm:grid-cols-3"><FilterSelect value={platform} change={value=>{setPlatform(value);setChoice(null)}} all="Todas" label="Todas las consolas" items={platforms}/><FilterSelect value={genre} change={value=>{setGenre(value);setChoice(null)}} all="Todos" label="Todos los géneros" items={genres}/><FilterSelect value={duration} change={value=>{setDuration(value);setChoice(null)}} all="Todas" label="Cualquier duración" items={["20","50","100"]} labels={{"20":"Hasta 20 horas","50":"Hasta 50 horas","100":"Hasta 100 horas"}}/></div><p className="text-sm text-slate-400">{candidates.length} candidato{candidates.length===1?"":"s"}</p>{recommendation&&<button type="button" onClick={()=>view(recommendation.game)} className="flex w-full items-center gap-3 rounded-2xl border border-cyan-400/20 bg-cyan-400/8 p-4 text-left transition hover:bg-cyan-400/12"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-400/15 text-cyan-300"><Brain/></span><span className="min-w-0"><span className="block text-xs font-semibold uppercase tracking-wide text-cyan-300">Recomendado según tus hábitos</span><span className="mt-1 block font-bold">{recommendation.game.title}</span><span className="mt-1 block text-xs text-slate-400">{recommendation.reason}</span></span><ChevronRight className="ml-auto shrink-0 text-cyan-300"/></button>}{choice?<div className="flex gap-4 rounded-2xl border border-violet-400/20 bg-violet-500/10 p-4">{choice.coverUrl?<div className="h-28 w-20 shrink-0 rounded-xl bg-cover bg-center" style={{backgroundImage:`url(${JSON.stringify(choice.coverUrl).slice(1,-1)})`}}/>:<div className={`grid h-28 w-20 shrink-0 place-items-center rounded-xl bg-gradient-to-br ${color[choice.platform]??color.Otra}`}><Gamepad2/></div>}<div><Badge variant="secondary">{choice.platform}</Badge><h3 className="mt-2 text-xl font-black">{choice.title}</h3><p className="mt-1 text-sm text-slate-400">{choice.genre||"Sin género"}{choice.estimatedHours?` · ${choice.estimatedHours} h estimadas`:""}</p><Button variant="ghost" className="mt-2 -ml-3 text-violet-300" onClick={()=>view(choice)}>Ver ficha<ChevronRight/></Button></div></div>:<div className="grid min-h-44 place-items-center rounded-2xl border border-dashed border-white/10 text-center text-slate-500"><div><Dices className="mx-auto mb-2 size-8"/><p>{candidates.length?"Deja que la bóveda elija por ti.":"No hay juegos que coincidan con esos filtros."}</p></div></div>}<DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cerrar</Button><Button className="bg-violet-500" onClick={pick} disabled={!candidates.length}><Dices/>{choice?"Elegir otro":"Elegir juego"}</Button></DialogFooter></DialogContent></Dialog>
-}
-
-function GameDetails({game,setOpen,edit,addSession}:{game:Game;setOpen:(open:boolean)=>void;edit:()=>void;addSession:(session:Omit<Session,"id">)=>Promise<void>}){
-  const [date,setDate]=useState(new Date().toISOString().slice(0,10)),[hours,setHours]=useState(""),[note,setNote]=useState(""),[adding,setAdding]=useState(false),[timerStarted,setTimerStarted]=useState<number|null>(null),[elapsed,setElapsed]=useState(0);
-  useEffect(()=>{if(timerStarted===null)return;const timer=window.setInterval(()=>setElapsed(Date.now()-timerStarted),1000);return()=>window.clearInterval(timer)},[timerStarted]);
-  function toggleTimer(){if(timerStarted===null){setElapsed(0);setTimerStarted(Date.now());return}const measured=Math.max(.1,Math.round((Date.now()-timerStarted)/360000)/10);setHours(String(measured));setTimerStarted(null);toast.success(`${measured} horas preparadas para registrar`)}
-  async function submit(){const amount=Number(hours);if(!Number.isFinite(amount)||amount<=0)return toast.error("Indica cuántas horas jugaste.");setAdding(true);await addSession({date,hours:Math.round(amount*10)/10,note:note.trim()});setHours("");setNote("");setAdding(false)}
-  return <Dialog open onOpenChange={setOpen}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-4xl"><div className="grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(280px,.9fr)]"><section><div className="relative aspect-video overflow-hidden rounded-2xl bg-[#07101f]">{game.coverUrl?<div className="absolute inset-0 bg-cover bg-center" style={{backgroundImage:`linear-gradient(to top, rgba(7,16,31,.75), transparent), url(${JSON.stringify(game.coverUrl).slice(1,-1)})`}}/>:<div className={`grid h-full place-items-center bg-gradient-to-br ${color[game.platform]??color.Otra}`}><ImageIcon className="size-16 text-white/70"/></div>}</div><div className="mt-5 flex flex-wrap items-start justify-between gap-3"><div><DialogTitle className="text-2xl">{game.title}</DialogTitle><DialogDescription className="mt-1 text-slate-400">{[game.developer,game.releaseYear||"",game.series].filter(Boolean).join(" · ")}</DialogDescription></div><Badge variant="outline" className={statusStyle[game.status]}>{game.status}</Badge></div><div className="mt-4 flex flex-wrap gap-2">{game.genre&&<Badge variant="secondary">{game.genre}</Badge>}<Badge variant="secondary">{game.platform}</Badge><Badge variant="secondary">{game.format}</Badge><Badge variant="secondary">Prioridad {game.priority.toLowerCase()}</Badge>{game.difficulty&&game.difficulty!=="Sin indicar"&&<Badge variant="secondary">Dificultad {game.difficulty.toLowerCase()}</Badge>}{game.estimatedHours>0&&<Badge variant="secondary">{game.estimatedHours} h estimadas</Badge>}</div>{game.description&&<p className="mt-5 leading-7 text-slate-300">{game.description}</p>}<div className="mt-6 grid gap-3 sm:grid-cols-2"><Detail icon={<Clock3/>} label="Tiempo jugado" value={`${game.hours} horas`}/><Detail icon={<Star/>} label="Calificación" value={game.rating?`${game.rating}/10`:"Sin calificar"}/><Detail icon={<CalendarDays/>} label="Fecha de inicio" value={formatDate(game.startedAt)}/><Detail icon={<Trophy/>} label="Fecha de finalización" value={formatDate(game.finishedAt)}/></div><div className="mt-6"><div className="flex justify-between text-sm"><span>Progreso</span><strong>{game.progress}%</strong></div><Progress value={game.progress} className="mt-2 h-2 bg-white/8 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-violet-500 [&_[data-slot=progress-indicator]]:to-cyan-400"/></div>{game.nextGoal&&<div className="mt-5 rounded-2xl bg-cyan-400/8 p-4"><div className="mb-1 flex items-center gap-2 text-sm font-semibold text-cyan-300"><Target className="size-4"/>Próximo objetivo</div><p className="text-slate-300">{game.nextGoal}</p></div>}{game.notes&&<div className="mt-5"><h3 className="font-semibold">Notas</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">{game.notes}</p></div>}</section><aside><div className="rounded-2xl border border-white/8 bg-white/[.035] p-4"><h3 className="font-bold">Registrar sesión</h3><p className="mt-1 text-sm text-slate-400">Suma tiempo y conserva un historial de lo que hiciste.</p><div className="mt-4 flex items-center justify-between rounded-xl bg-black/20 p-3"><div><span className="block text-xs text-slate-500">Cronómetro</span><span className="font-mono text-xl font-bold">{formatElapsed(elapsed)}</span></div><Button type="button" variant={timerStarted===null?"outline":"destructive"} onClick={toggleTimer}>{timerStarted===null?<><Play/>Comenzar</>:<><Square/>Detener</>}</Button></div><div className="mt-4 grid gap-3"><Field label="Fecha"><Input type="date" value={date} onChange={e=>setDate(e.target.value)}/></Field><Field label="Duración (horas)"><Input type="number" min="0.1" step="0.1" value={hours} onChange={e=>setHours(e.target.value)} placeholder="Ej. 1.5"/></Field><Field label="Nota breve"><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Misión, logro o avance..."/></Field><Button className="bg-violet-500" onClick={submit} disabled={adding}>{adding?"Guardando…":"Añadir sesión"}</Button></div></div><div className="mt-5"><h3 className="font-bold">Historial de sesiones</h3>{game.sessions?.length?<div className="mt-3 space-y-2">{[...game.sessions].sort((a,b)=>b.date.localeCompare(a.date)).map(session=><div key={session.id} className="rounded-xl border border-white/8 bg-black/15 p-3"><div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">{formatDate(session.date)}</span><Badge variant="secondary">{session.hours} h</Badge></div>{session.note&&<p className="mt-2 text-sm text-slate-400">{session.note}</p>}</div>)}</div>:<p className="mt-3 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-500">Todavía no registraste sesiones.</p>}</div></aside></div><DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cerrar</Button><Button className="bg-violet-500" onClick={edit}><Pencil/>Editar ficha</Button></DialogFooter></DialogContent></Dialog>
-}
-
-function Detail({icon,label,value}:{icon:ReactNode;label:string;value:string}){return <div className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[.03] p-3"><span className="text-cyan-300 [&_svg]:size-4">{icon}</span><span><span className="block text-xs text-slate-500">{label}</span><span className="text-sm font-semibold">{value}</span></span></div>}
-function formatDate(value:string){if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return "Sin registrar";const [year,month,day]=value.split("-").map(Number),date=new Date(year,month-1,day);return Number.isNaN(date.getTime())?"Sin registrar":new Intl.DateTimeFormat("es",{dateStyle:"medium"}).format(date)}
-function formatElapsed(milliseconds:number){const seconds=Math.floor(milliseconds/1000),hours=Math.floor(seconds/3600),minutes=Math.floor(seconds%3600/60);return [hours,minutes,seconds%60].map(value=>String(value).padStart(2,"0")).join(":")}
-function FilterControl({label,children}:{label:string;children:ReactNode}){return <div className="space-y-1.5"><Label className="text-xs font-semibold text-slate-400">{label}</Label>{children}</div>}
-function FilterSelect({value,change,all,label,items,labels}:{value:string;change:(value:string)=>void;all:string;label:string;items:string[];labels?:Record<string,string>}){return <Select value={value} onValueChange={change}><SelectTrigger className="w-full border-white/8 bg-[#0b1628]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value={all}>{label}</SelectItem>{items.map(item=><SelectItem key={item} value={item}>{labels?.[item]??item}</SelectItem>)}</SelectContent></Select>}
-
-function CatalogDialog({games,settings,setOpen,addGames}:{games:Game[];settings:AppSettings;setOpen:(open:boolean)=>void;addGames:(games:Draft[])=>Promise<number>}){
-  const [term,setTerm]=useState(""),[results,setResults]=useState<WikidataResult[]>([]),[selected,setSelected]=useState<Set<string>>(new Set()),[searching,setSearching]=useState(false),[adding,setAdding]=useState(false),[progress,setProgress]=useState(0),[message,setMessage]=useState("");
-  const exists=(result:WikidataResult)=>games.some(game=>game.sourceId===result.id||normalizeTitle(game.title)===normalizeTitle(result.label));
-  const available=results.filter(result=>!exists(result));
-  async function search(){if(term.trim().length<2)return toast.error("Escribe al menos dos letras.");setSearching(true);setMessage("");setSelected(new Set());try{const matches=await searchWikidataCatalog(term.trim());setResults(matches);if(!matches.length)setMessage("No encontramos títulos. Prueba con otro nombre o agrega el juego manualmente.")}catch(error){console.error(error);setMessage("Wikidata no respondió. Inténtalo nuevamente.")}finally{setSearching(false)}}
-  function toggle(id:string){setSelected(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next})}
-  async function addSelected(){const chosen=results.filter(result=>selected.has(result.id)&&!exists(result));if(!chosen.length)return;setAdding(true);setProgress(0);const entries:Draft[]=[];let failed=0;try{for(let index=0;index<chosen.length;index++){try{const metadata=await getWikidataGame(chosen[index],settings);entries.push({...blank,status:settings.defaultStatus,platform:settings.defaultPlatform,format:settings.defaultFormat,...metadata,title:String(metadata.title||chosen[index].label),lists:[],sessions:[]})}catch(error){console.error(error);failed++}setProgress(index+1)}const added=await addGames(entries);if(failed)toast.warning(failed===1?"Una ficha no se pudo importar":`${failed} fichas no se pudieron importar`);if(added)setOpen(false)}catch(error){console.error(error);toast.error("La importación se interrumpió. Inténtalo nuevamente.")}finally{setAdding(false)}}
-  return <Dialog open onOpenChange={value=>{if(!adding)setOpen(value)}}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-3xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Search className="text-cyan-300"/>Explorar catálogo</DialogTitle><DialogDescription className="text-slate-400">Busca un título o escribe el nombre de una saga, selecciona varios juegos y agrégalos juntos. Los que ya tienes aparecen bloqueados.</DialogDescription></DialogHeader><div className="flex gap-2"><Input autoFocus value={term} onChange={event=>setTerm(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();void search()}}} placeholder="Ej. Halo, Zelda, Final Fantasy…"/><Button onClick={search} disabled={searching||adding} className="bg-violet-500"><Search/>{searching?"Buscando…":"Buscar"}</Button></div>{message&&<p className="text-sm text-amber-300">{message}</p>}{results.length>0&&<><div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span className="text-slate-400">{available.length} disponible{available.length===1?"":"s"} · {results.length-available.length} en tu bóveda</span><Button type="button" size="sm" variant="ghost" disabled={!available.length||adding} onClick={()=>setSelected(new Set(available.map(result=>result.id)))}>Seleccionar disponibles</Button></div><div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">{results.map(result=>{const already=exists(result),checked=selected.has(result.id);return <button type="button" key={result.id} disabled={already||adding} onClick={()=>toggle(result.id)} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${already?"cursor-not-allowed border-emerald-400/15 bg-emerald-400/5 opacity-65":checked?"border-violet-400 bg-violet-500/15":"border-white/8 bg-black/15 hover:border-white/20 hover:bg-white/5"}`}><span className={`grid size-9 shrink-0 place-items-center rounded-lg ${already?"bg-emerald-400/10 text-emerald-300":checked?"bg-violet-500 text-white":"bg-white/7 text-slate-400"}`}>{already?<Library className="size-4"/>:checked?<Check className="size-4"/>:<Plus className="size-4"/>}</span><span className="min-w-0 flex-1"><span className="block font-semibold">{result.label}</span><span className="block truncate text-xs text-slate-400">{result.description||"Sin descripción"} · {result.id}</span></span>{already&&<Badge variant="outline" className="border-emerald-400/20 text-emerald-300">Ya está en tu bóveda</Badge>}</button>})}</div></>}<DialogFooter><Button variant="outline" onClick={()=>setOpen(false)} disabled={adding}>Cancelar</Button><Button className="bg-violet-500" onClick={addSelected} disabled={!selected.size||adding}>{adding?`Preparando fichas ${progress}/${selected.size}…`:`Agregar ${selected.size||""} seleccionado${selected.size===1?"":"s"}`}</Button></DialogFooter></DialogContent></Dialog>
-}
-
-function MetadataPreview({preview,apply,close}:{preview:{result:WikidataResult;data:Partial<Draft>};apply:()=>void;close:()=>void}){const {data,result}=preview;const fields=[data.coverUrl&&"Carátula",data.genre&&"Género",data.developer&&"Desarrollador",data.releaseYear&&"Año",data.series&&"Saga",data.platform&&data.platform!=="Otra"&&"Plataforma",data.description&&"Descripción"].filter(Boolean);return <div className="mt-3 rounded-2xl border border-violet-400/25 bg-violet-500/10 p-4"><div className="flex gap-4">{data.coverUrl?<div className="h-28 w-20 shrink-0 rounded-lg bg-cover bg-center" style={{backgroundImage:`url(${JSON.stringify(data.coverUrl).slice(1,-1)})`}}/>:<div className="grid h-28 w-20 shrink-0 place-items-center rounded-lg bg-white/5"><ImageIcon className="text-slate-500"/></div>}<div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-violet-300">Vista previa · {result.id}</p><h3 className="mt-1 font-bold">{String(data.title||result.label)}</h3><p className="mt-1 text-sm text-slate-400">{[data.developer,data.releaseYear,data.platform].filter(Boolean).join(" · ")}</p><div className="mt-2 flex flex-wrap gap-1.5">{fields.length?fields.map(field=><Badge key={String(field)} variant="secondary">{field}</Badge>):<span className="text-xs text-amber-300">La ficha contiene pocos datos útiles.</span>}</div></div></div>{data.description&&<p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-300">{data.description}</p>}<div className="mt-3 flex justify-end gap-2"><Button type="button" size="sm" variant="ghost" onClick={close}>Probar otra</Button><Button type="button" size="sm" className="bg-violet-500" onClick={apply}>Aplicar estos datos</Button></div></div>}
-
-function GameDialog({settings,open,setOpen,draft,setDraft,editing,editingId,save,saving,games}:{settings:AppSettings;open:boolean;setOpen:(v:boolean)=>void;draft:Draft;setDraft:(d:Draft)=>void;editing:boolean;editingId?:string;save:()=>void;saving:boolean;games:Game[]}){
-  const [metadataResults,setMetadataResults]=useState<WikidataResult[]>([]),[metadataLoading,setMetadataLoading]=useState(false),[metadataMessage,setMetadataMessage]=useState(""),[metadataPreview,setMetadataPreview]=useState<{result:WikidataResult;data:Partial<Draft>}|null>(null);
-  const duplicates=useMemo(()=>draft.title.trim().length>1?games.filter(game=>game.id!==editingId&&normalizeTitle(game.title)===normalizeTitle(draft.title)):[],[games,draft.title,editingId]);
-  async function searchMetadata(){if(draft.title.trim().length<2)return toast.error("Escribe al menos dos letras del título.");setMetadataLoading(true);setMetadataMessage("");setMetadataPreview(null);try{const results=await searchWikidataGames(draft.title.trim());setMetadataResults(results);if(!results.length)setMetadataMessage("No encontramos coincidencias. Puedes completar la ficha manualmente.")}catch(error){console.error(error);setMetadataMessage("Wikidata no respondió. Inténtalo de nuevo o completa la ficha manualmente.")}finally{setMetadataLoading(false)}}
-  async function previewMetadata(result:WikidataResult){setMetadataLoading(true);setMetadataMessage("");try{const metadata=await getWikidataGame(result,settings);setMetadataPreview({result,data:metadata});const missing=[!metadata.coverUrl&&"carátula",!metadata.genre&&"género",!metadata.developer&&"desarrollador",!metadata.releaseYear&&"año",!metadata.series&&"saga"].filter(Boolean);if(missing.length){setMetadataMessage(`Esta edición no incluye: ${missing.join(", ")}. Mostramos otras coincidencias debajo para que puedas compararlas.`);const alternatives=await searchWikidataGames(String(metadata.title||draft.title));setMetadataResults(alternatives)}}catch(error){console.error(error);setMetadataMessage("No pudimos leer esa ficha. Prueba otra coincidencia.")}finally{setMetadataLoading(false)}}
-  function applyMetadata(){if(!metadataPreview)return;const data=settings.preserveManualData?Object.fromEntries(Object.entries(metadataPreview.data).filter(([key])=>{const current=draft[key as keyof Draft];return current===""||current===0||current==="Otra"})):metadataPreview.data;setDraft({...draft,...data});setMetadataResults([]);setMetadataPreview(null);setMetadataMessage("");toast.success("Información completada desde Wikidata")}
-  return <Dialog open={open} onOpenChange={value=>{setOpen(value);if(!value){setMetadataResults([]);setMetadataMessage("");setMetadataPreview(null)}}}><DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#0b1628] text-slate-100 sm:max-w-2xl"><DialogHeader><DialogTitle>{editing?"Actualizar partida":"Añadir juego"}</DialogTitle><DialogDescription className="text-slate-400">Busca el juego, luego selecciona una coincidencia para completar la ficha. Podrás corregir todos los datos antes de guardar.</DialogDescription></DialogHeader><div className="grid gap-4 py-2 sm:grid-cols-2"><Field label="Juego" wide><div className="flex gap-2"><Input value={draft.title} onChange={e=>{setDraft({...draft,title:e.target.value,source:"Manual",sourceId:""});setMetadataResults([]);setMetadataMessage("")}} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void searchMetadata()}}} placeholder="Ej. Halo Infinite"/><Button type="button" variant="outline" onClick={searchMetadata} disabled={metadataLoading}><Search/>{metadataLoading?"Buscando…":"Buscar datos"}</Button></div>{metadataResults.length>0&&<div className="mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#07101f]"><p className="border-b border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-cyan-300">Selecciona una coincidencia para rellenar los campos</p>{metadataResults.map(result=><button type="button" key={result.id} onClick={()=>previewMetadata(result)} className="flex w-full items-center justify-between gap-3 border-b border-white/7 px-3 py-2.5 text-left transition last:border-0 hover:bg-white/7"><span><span className="block text-sm font-semibold text-slate-100">{result.label}</span><span className="block text-xs text-slate-400">{result.description||"Sin descripción"} · {result.id}</span></span><span className="shrink-0 text-xs font-semibold text-violet-300">Vista previa →</span></button>)}</div>}{metadataPreview&&<MetadataPreview preview={metadataPreview} apply={applyMetadata} close={()=>setMetadataPreview(null)}/>} {metadataMessage&&<p className="mt-2 text-sm text-amber-300">{metadataMessage}</p>}{duplicates.length>0&&<p className="mt-2 text-sm text-amber-300">Ya existe: {duplicates.map(game=>`${game.title} (${game.platform})`).join(", ")}. Las versiones de otra plataforma sí se pueden guardar.</p>}{draft.sourceId&&<p className="mt-2 text-xs text-emerald-300">Ficha vinculada a {draft.sourceId} en Wikidata.</p>}</Field><Field label="URL de la carátula" wide><Input type="url" value={draft.coverUrl} onChange={e=>setDraft({...draft,coverUrl:e.target.value})} placeholder="https://…"/>{draft.coverUrl&&<div className="mt-2 h-28 rounded-xl bg-cover bg-center" style={{backgroundImage:`url(${JSON.stringify(draft.coverUrl).slice(1,-1)})`}}/>}</Field><Field label="Género"><Input value={draft.genre} onChange={e=>setDraft({...draft,genre:e.target.value})} placeholder="Ej. RPG"/></Field><Field label="Desarrollador"><Input value={draft.developer} onChange={e=>setDraft({...draft,developer:e.target.value})} placeholder="Ej. Xbox Game Studios"/></Field><Field label="Año de lanzamiento"><Input type="number" min="1950" max="2100" value={draft.releaseYear||""} onChange={e=>setDraft({...draft,releaseYear:Number(e.target.value)})}/></Field><Field label="Saga"><Input value={draft.series} onChange={e=>setDraft({...draft,series:e.target.value})} placeholder="Ej. Halo"/></Field><Field label="Descripción" wide><Textarea value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder="Resumen breve del juego..." className="min-h-20"/></Field><Pick label="Consola" value={draft.platform} items={platforms} change={v=>setDraft({...draft,platform:v})}/><Pick label="Formato" value={draft.format} items={["Digital","Físico"]} change={v=>setDraft({...draft,format:v})}/><Pick label="Estado" value={draft.status} items={statuses} change={v=>setDraft({...draft,status:v})}/><Pick label="Prioridad" value={draft.priority} items={["Alta","Normal","Baja"]} change={v=>setDraft({...draft,priority:v})}/><Field label="Horas jugadas"><Input type="number" min="0" step="0.1" value={draft.hours} onChange={e=>setDraft({...draft,hours:Number(e.target.value)})}/></Field><Field label="Duración estimada (horas)"><Input type="number" min="0" step="1" value={draft.estimatedHours||""} onChange={e=>setDraft({...draft,estimatedHours:Number(e.target.value)})} placeholder="Para el selector aleatorio"/></Field><Pick label="Dificultad" value={draft.difficulty} items={["Sin indicar","Fácil","Normal","Difícil","Muy difícil"]} change={v=>setDraft({...draft,difficulty:v})}/><Field label="Calificación (0–10)"><Input type="number" min="0" max="10" step="0.5" value={draft.rating||""} onChange={e=>setDraft({...draft,rating:Math.min(10,Math.max(0,Number(e.target.value)))})}/></Field><Field label="Fecha de inicio"><Input type="date" value={draft.startedAt} onChange={e=>setDraft({...draft,startedAt:e.target.value})}/></Field><Field label="Fecha de finalización"><Input type="date" value={draft.finishedAt} onChange={e=>setDraft({...draft,finishedAt:e.target.value})}/></Field><Field label={`Progreso · ${draft.progress}%`} wide><Slider value={[draft.progress]} onValueChange={v=>setDraft({...draft,progress:Array.isArray(v)?v[0]:v})} max={100} step={1} className="py-3"/></Field><Field label="Listas personalizadas" wide><div className="flex flex-wrap gap-2">{customLists.map(list=><button type="button" key={list} onClick={()=>setDraft({...draft,lists:(draft.lists??[]).includes(list)?(draft.lists??[]).filter(item=>item!==list):[...(draft.lists??[]),list]})} className={`rounded-full border px-3 py-1.5 text-sm transition ${(draft.lists??[]).includes(list)?"border-violet-400 bg-violet-500/20 text-violet-200":"border-white/10 bg-white/[.03] text-slate-400 hover:border-white/25"}`}>{list}</button>)}</div></Field><Field label="Próximo objetivo" wide><Input value={draft.nextGoal} onChange={e=>setDraft({...draft,nextGoal:e.target.value})} placeholder="¿Qué debes hacer cuando vuelvas?"/></Field><Field label="Notas" wide><Textarea value={draft.notes} onChange={e=>setDraft({...draft,notes:e.target.value})} placeholder="Build, misión, ubicación, objetos pendientes..." className="min-h-24"/></Field><div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[.02] p-3 sm:col-span-2"><div className="space-y-0.5"><div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Lock className="size-4 text-amber-400"/><span>Marcar como juego privado</span></div><p className="text-xs text-slate-400">Este juego no aparecerá en tu perfil público compartido ni en las tarjetas de resumen.</p></div><Switch checked={!!draft.isPrivate} onCheckedChange={checked=>setDraft({...draft,isPrivate:checked})}/></div></div><DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cancelar</Button><Button className="bg-violet-500" onClick={save} disabled={saving||metadataLoading}>{saving?"Guardando...":editing?"Guardar cambios":"Añadir a la bóveda"}</Button></DialogFooter></DialogContent></Dialog>
-}
-
-function Field({label,wide,children}:{label:string;wide?:boolean;children:ReactNode}){return <div className={`space-y-2 ${wide?"sm:col-span-2":""}`}><Label>{label}</Label>{children}</div>}
-function Pick({label,value,items,change}:{label:string;value:string;items:string[];change:(v:string)=>void}){return <Field label={label}><Select value={value} onValueChange={change}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{items.map(i=><SelectItem key={i} value={i}>{i}</SelectItem>)}</SelectContent></Select></Field>}
