@@ -1,4 +1,27 @@
-# vinext-starter
+# Mi Bóveda Gamer
+
+Gestor personal de colección, backlog y progreso de videojuegos. La aplicación se publica en GitHub Pages y guarda la información de cada usuario en Cloud Firestore.
+
+## Configuración
+
+1. Crea una aplicación web en Firebase.
+2. Activa Google como proveedor de Authentication.
+3. Crea una base de datos Cloud Firestore y publica `firestore.rules`.
+4. Copia `.env.example` como `.env.local` y completa la configuración pública de Firebase.
+5. Añade esos mismos valores como variables del repositorio en GitHub Actions.
+
+## Desarrollo
+
+```bash
+pnpm install
+pnpm dev
+```
+
+## Publicación
+
+Cada cambio enviado a `main` genera una exportación estática y la publica automáticamente en GitHub Pages.
+
+## Origen
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 
