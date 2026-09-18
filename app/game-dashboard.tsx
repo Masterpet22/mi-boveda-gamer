@@ -858,14 +858,17 @@ export function GameDashboard() {
   if (!user) {
     if (currentNavTab === "community") {
       return (
-        <CommunityView
-          db={db}
-          currentUserId={null}
-          currentUserName="Invitado"
-          currentUserPhoto={null}
-          onViewProfile={targetUid => setPublicViewUid(targetUid)}
-          onBackToLibrary={() => setCurrentNavTab("library")}
-        />
+        <>
+          <Toaster position="top-right" richColors />
+          <CommunityView
+            db={db}
+            currentUserId={null}
+            currentUserName="Invitado"
+            currentUserPhoto={null}
+            onViewProfile={targetUid => setPublicViewUid(targetUid)}
+            onBackToLibrary={() => setCurrentNavTab("library")}
+          />
+        </>
       );
     }
     return (
@@ -1068,6 +1071,7 @@ export function GameDashboard() {
           currentUserId={user.uid}
           currentUserName={profileName}
           currentUserPhoto={user.photoURL}
+          currentUserGames={games}
           publicProfileSettings={publicProfileSettings}
           onOpenShareSettings={() => setShareOpen(true)}
           onViewProfile={targetUid => setPublicViewUid(targetUid)}

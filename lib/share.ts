@@ -31,6 +31,17 @@ export interface CommunityPost {
   category: "Pregunta" | "Recomendación" | "Debate" | "Logro";
   gameTitle?: string;
   platform?: string;
+  attachmentUrl?: string;
+  sharedGame?: {
+    id: string;
+    title: string;
+    platform: string;
+    status: string;
+    progress: number;
+    hours: number;
+    rating: number;
+    coverUrl?: string;
+  };
   createdAt: string;
   likes: number;
   likedBy?: string[];

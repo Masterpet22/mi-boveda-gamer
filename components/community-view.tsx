@@ -1,31 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Firestore } from "firebase/firestore";
-import {
-  Archive,
-  ArrowRight,
-  ExternalLink,
-  Flame,
-  Gamepad2,
-  Globe,
-  Heart,
-  HelpCircle,
-  Library,
-  Lightbulb,
-  MessageCircle,
-  MessageSquare,
-  Plus,
-  Radio,
-  Search,
-  Send,
-  Share2,
-  Sparkles,
-  Star,
-  Tag,
-  Trophy,
-  Users,
-} from "lucide-react";
+import { Archive, Camera, Flame, Gamepad2, Globe2, Heart, ImageIcon, Library, MessageCircle, Plus, Search, Send, Share2, Sparkles, Trophy, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -33,1170 +10,244 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  addCommunityReply,
-  createCommunityPost,
-  fetchAllPublicProfiles,
-  fetchCommunityPosts,
-  togglePostLike,
-  type CommunityPost,
-  type PublicProfileData,
-  type PublicProfileSettings,
-} from "@/lib/share";
+import type { Game } from "@/lib/game-types";
+import { addCommunityReply, createCommunityPost, fetchAllPublicProfiles, fetchCommunityPosts, togglePostLike, type CommunityPost, type PublicProfileData, type PublicProfileSettings } from "@/lib/share";
 
 interface CommunityViewProps {
   db: Firestore | null;
   currentUserId?: string | null;
   currentUserName?: string | null;
   currentUserPhoto?: string | null;
+  currentUserGames?: Game[];
   publicProfileSettings?: PublicProfileSettings;
   onOpenShareSettings?: () => void;
   onViewProfile: (userId: string) => void;
   onBackToLibrary: () => void;
 }
 
-type FeedFilter = "all" | "posts" | "questions" | "recommendations" | "milestones" | "profiles";
+type FeedFilter = "all" | "questions" | "milestones" | "profiles";
+type ActivityEvent = { id: string; userId: string; handle: string; gameTitle: string; platform: string; date: string; progress: number };
+type FeedItem = { kind: "post"; date: string; item: CommunityPost } | { kind: "activity"; date: string; item: ActivityEvent };
 
-interface ActivityEvent {
-  id: string;
-  userId: string;
-  handle: string;
-  gameTitle: string;
-  platform: string;
-  type: "completed" | "playing" | "rated";
-  detail: string;
-  date: string;
-  rating?: number;
-  coverUrl?: string;
-  progress?: number;
+function timeAgo(value?: string) {
+  if (!value) return "ahora";
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 60) return "ahora";
+  if (seconds < 3600) return `hace ${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `hace ${Math.floor(seconds / 3600)} h`;
+  if (seconds < 604800) return `hace ${Math.floor(seconds / 86400)} d`;
+  return new Intl.DateTimeFormat("es", { day: "numeric", month: "short" }).format(new Date(time));
 }
 
-type UnifiedFeedItem =
-  | { kind: "post"; item: CommunityPost; date: string }
-  | { kind: "activity"; item: ActivityEvent; date: string };
+function initials(name?: string | null) {
+  return (name || "G").split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+}
 
-function formatTimeAgo(isoString?: string): string {
-  if (!isoString) return "";
-  try {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
-    if (diffSec < 60) return "hace unos segundos";
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `hace ${diffMin} min`;
-    const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `hace ${diffHour} h`;
-    const diffDays = Math.floor(diffHour / 24);
-    if (diffDays < 7) return `hace ${diffDays} d`;
-    return new Intl.DateTimeFormat("es", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(date);
-  } catch {
-    return "";
+async function compressScreenshot(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("invalid-type");
+  if (file.size > 10 * 1024 * 1024) throw new Error("too-large");
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = reject;
+    element.src = source;
+  });
+  const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  context?.drawImage(image, 0, 0, canvas.width, canvas.height);
+  let quality = 0.78;
+  let result = canvas.toDataURL("image/jpeg", quality);
+  while (result.length > 650_000 && quality > 0.42) {
+    quality -= 0.08;
+    result = canvas.toDataURL("image/jpeg", quality);
   }
+  return result;
 }
 
-export function CommunityView({
-  db,
-  currentUserId,
-  currentUserName = "Gamer",
-  currentUserPhoto,
-  publicProfileSettings,
-  onOpenShareSettings,
-  onViewProfile,
-  onBackToLibrary,
-}: CommunityViewProps) {
-  // Feed Filter: defaults to 'all' (Unified Facebook-style feed)
-  const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
-
-  // Profiles State
+export function CommunityView({ db, currentUserId, currentUserName = "Gamer", currentUserPhoto, currentUserGames = [], publicProfileSettings, onOpenShareSettings, onViewProfile, onBackToLibrary }: CommunityViewProps) {
+  const screenshotInput = useRef<HTMLInputElement>(null);
+  const [filter, setFilter] = useState<FeedFilter>("all");
   const [profiles, setProfiles] = useState<PublicProfileData[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(() => Boolean(db));
-  const [searchProfile, setSearchProfile] = useState("");
-
-  // Posts State
   const [posts, setPosts] = useState<CommunityPost[]>([]);
-  const [loadingPosts, setLoadingPosts] = useState(() => Boolean(db));
-  const [composerExpanded, setComposerExpanded] = useState(false);
-  const [submittingPost, setSubmittingPost] = useState(false);
-
-  // Composer Form State
-  const [postTitle, setPostTitle] = useState("");
-  const [postContent, setPostContent] = useState("");
-  const [postCategory, setPostCategory] = useState<"Pregunta" | "Recomendación" | "Debate" | "Logro">("Pregunta");
-  const [postGame, setPostGame] = useState("");
-  const [postPlatform, setPostPlatform] = useState("");
-
-  // Comment Replies state
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [loadingProfiles, setLoadingProfiles] = useState(Boolean(db));
+  const [loadingPosts, setLoadingPosts] = useState(Boolean(db));
+  const [profileSearch, setProfileSearch] = useState("");
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [category, setCategory] = useState<CommunityPost["category"]>("Debate");
+  const [content, setContent] = useState("");
+  const [selectedGameId, setSelectedGameId] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [processingImage, setProcessingImage] = useState(false);
   const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 
-  // Load profiles
   useEffect(() => {
-    if (!db) return;
-    let isMounted = true;
-    fetchAllPublicProfiles(db)
-      .then(list => {
-        if (isMounted) {
-          setProfiles(list);
-          setLoadingProfiles(false);
-        }
-      })
-      .catch(() => {
-        if (isMounted) setLoadingProfiles(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [db]);
-
-  // Load community posts
-  useEffect(() => {
-    if (!db) return;
-    let isMounted = true;
-    fetchCommunityPosts(db)
-      .then(list => {
-        if (isMounted) {
-          setPosts(list);
-          setLoadingPosts(false);
-        }
-      })
-      .catch(() => {
-        if (isMounted) setLoadingPosts(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [db]);
-
-  // Filtered profiles for profiles tab and sidebar
-  const filteredProfiles = useMemo(() => {
-    const q = searchProfile.trim().toLowerCase();
-    if (!q) return profiles;
-    return profiles.filter(p => {
-      const haystack = [p.handle, p.bio, ...p.stats.consoles.map(c => c.platform)].join(" ").toLowerCase();
-      return haystack.includes(q);
+    if (!db) { setLoadingPosts(false); setLoadingProfiles(false); return; }
+    let mounted = true;
+    void Promise.allSettled([fetchCommunityPosts(db), fetchAllPublicProfiles(db)]).then(results => {
+      if (!mounted) return;
+      if (results[0].status === "fulfilled") setPosts(results[0].value);
+      if (results[1].status === "fulfilled") setProfiles(results[1].value);
+      setLoadingPosts(false);
+      setLoadingProfiles(false);
     });
-  }, [profiles, searchProfile]);
+    return () => { mounted = false; };
+  }, [db]);
 
-  // Derived Feed of Activities from public profiles
-  const activityFeed = useMemo(() => {
-    const events: ActivityEvent[] = [];
-
-    for (const p of profiles) {
-      for (const g of p.games) {
-        if (["Terminado", "Completado"].includes(g.status)) {
-          events.push({
-            id: `act-${p.userId}-${g.id}-done`,
-            userId: p.userId,
-            handle: p.handle,
-            gameTitle: g.title,
-            platform: g.platform,
-            type: "completed",
-            detail: `ha terminado ${g.title} con un progreso del ${g.progress}%`,
-            date: g.finishedAt || g.updatedAt,
-            rating: g.rating,
-            coverUrl: g.coverUrl,
-            progress: g.progress,
-          });
-        } else if (g.status === "Jugando" && g.progress > 0) {
-          events.push({
-            id: `act-${p.userId}-${g.id}-playing`,
-            userId: p.userId,
-            handle: p.handle,
-            gameTitle: g.title,
-            platform: g.platform,
-            type: "playing",
-            detail: `está jugando ${g.title} (${g.progress}%)`,
-            date: g.updatedAt,
-            coverUrl: g.coverUrl,
-            progress: g.progress,
-          });
-        }
-      }
-    }
-
-    return events.sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 30);
+  const selectedGame = currentUserGames.find(game => game.id === selectedGameId);
+  const activities = useMemo<ActivityEvent[]>(() => profiles.flatMap(profile => profile.games.filter(game => game.status === "Jugando" || ["Terminado", "Completado"].includes(game.status)).map(game => ({ id: `${profile.userId}-${game.id}-${game.updatedAt}`, userId: profile.userId, handle: profile.handle, gameTitle: game.title, platform: game.platform, date: game.finishedAt || game.updatedAt, progress: game.progress }))).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20), [profiles]);
+  const feed = useMemo<FeedItem[]>(() => {
+    const postItems: FeedItem[] = posts.filter(post => filter === "all" || (filter === "questions" && post.category === "Pregunta") || (filter === "milestones" && post.category === "Logro")).map(item => ({ kind: "post", item, date: item.createdAt }));
+    const activityItems: FeedItem[] = filter === "all" || filter === "milestones" ? activities.map(item => ({ kind: "activity", item, date: item.date })) : [];
+    return [...postItems, ...activityItems].sort((a, b) => b.date.localeCompare(a.date));
+  }, [activities, filter, posts]);
+  const visibleProfiles = useMemo(() => {
+    const query = profileSearch.trim().toLowerCase();
+    if (!query) return profiles;
+    return profiles.filter(profile => [profile.handle, profile.bio, ...profile.stats.consoles.map(item => item.platform)].join(" ").toLowerCase().includes(query));
+  }, [profileSearch, profiles]);
+  const trending = useMemo(() => {
+    const counts = new Map<string, number>();
+    profiles.forEach(profile => profile.games.forEach(game => counts.set(game.title, (counts.get(game.title) || 0) + 1)));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
   }, [profiles]);
 
-  // Trending Games computed from community profiles
-  const trendingGames = useMemo(() => {
-    const counts = new Map<string, { title: string; count: number; platform?: string }>();
-    for (const p of profiles) {
-      for (const g of p.games) {
-        const key = g.title.trim().toLowerCase();
-        const existing = counts.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          counts.set(key, { title: g.title, count: 1, platform: g.platform });
-        }
-      }
-    }
-    return Array.from(counts.values())
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-  }, [profiles]);
+  function openComposer(nextCategory: CommunityPost["category"] = "Debate") {
+    if (!currentUserId) { toast.info("Inicia sesión para publicar en la comunidad."); return; }
+    setCategory(nextCategory);
+    setComposerOpen(true);
+  }
 
-  // Unified Chronological Feed (Facebook-style stream)
-  const unifiedFeed = useMemo<UnifiedFeedItem[]>(() => {
-    const items: UnifiedFeedItem[] = [];
+  async function handleScreenshot(file?: File) {
+    if (!file) return;
+    setProcessingImage(true);
+    try { setAttachmentUrl(await compressScreenshot(file)); setComposerOpen(true); }
+    catch { toast.error("Usa una imagen JPG, PNG o WebP de hasta 10 MB."); }
+    finally { setProcessingImage(false); if (screenshotInput.current) screenshotInput.current.value = ""; }
+  }
 
-    // Filter posts according to feedFilter
-    for (const post of posts) {
-      if (feedFilter === "all" || feedFilter === "posts") {
-        items.push({ kind: "post", item: post, date: post.createdAt });
-      } else if (feedFilter === "questions" && post.category === "Pregunta") {
-        items.push({ kind: "post", item: post, date: post.createdAt });
-      } else if (feedFilter === "recommendations" && post.category === "Recomendación") {
-        items.push({ kind: "post", item: post, date: post.createdAt });
-      } else if (feedFilter === "milestones" && post.category === "Logro") {
-        items.push({ kind: "post", item: post, date: post.createdAt });
-      }
-    }
-
-    // Include activity events in "all" and "milestones"
-    if (feedFilter === "all" || feedFilter === "milestones") {
-      for (const act of activityFeed) {
-        items.push({ kind: "activity", item: act, date: act.date });
-      }
-    }
-
-    return items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  }, [posts, activityFeed, feedFilter]);
-
-  // Submit new post
-  async function handleCreatePost() {
-    if (!db) return;
-    if (!currentUserId) {
-      toast.error("Inicia sesión para publicar en la comunidad gamer.");
-      return;
-    }
-    if (!postContent.trim()) {
-      toast.error("Por favor escribe el contenido de tu publicación.");
-      return;
-    }
-
-    setSubmittingPost(true);
+  async function publish() {
+    if (!db || !currentUserId) return;
+    if (!content.trim() && !selectedGame && !attachmentUrl) { toast.error("Escribe algo o adjunta un juego o captura."); return; }
+    setSubmitting(true);
     try {
-      const derivedTitle =
-        postTitle.trim() ||
-        postContent.trim().slice(0, 60) + (postContent.trim().length > 60 ? "…" : "");
-
+      const fallback = selectedGame ? `Estoy jugando ${selectedGame.title}.` : "Compartió una captura con la comunidad.";
       const created = await createCommunityPost(db, {
-        authorId: currentUserId,
-        authorName: currentUserName || "Gamer",
-        authorPhoto: currentUserPhoto ?? undefined,
-        title: derivedTitle,
-        content: postContent.trim(),
-        category: postCategory,
-        gameTitle: postGame.trim() || undefined,
-        platform: postPlatform.trim() || undefined,
+        authorId: currentUserId, authorName: currentUserName || "Gamer", authorPhoto: currentUserPhoto || undefined, title: "", content: content.trim() || fallback, category,
+        gameTitle: selectedGame?.title, platform: selectedGame?.platform, attachmentUrl: attachmentUrl || undefined,
+        sharedGame: selectedGame ? { id: selectedGame.id, title: selectedGame.title, platform: selectedGame.platform, status: selectedGame.status, progress: selectedGame.progress, hours: selectedGame.hours, rating: selectedGame.rating, coverUrl: selectedGame.coverUrl || undefined } : undefined,
       });
-
-      setPosts(prev => [created, ...prev]);
-      setPostTitle("");
-      setPostContent("");
-      setPostGame("");
-      setPostPlatform("");
-      setComposerExpanded(false);
-      toast.success("¡Tu publicación está en el muro de la comunidad!");
-    } catch (err) {
-      console.error(err);
-      toast.error("No pudimos publicar en este momento.");
-    } finally {
-      setSubmittingPost(false);
-    }
+      setPosts(previous => [created, ...previous]);
+      setContent(""); setSelectedGameId(""); setAttachmentUrl(""); setComposerOpen(false); setFilter("all");
+      toast.success("Publicado en Comunidad Gamer");
+    } catch (error) { console.error(error); toast.error("No se pudo publicar. Revisa tu conexión e inténtalo otra vez."); }
+    finally { setSubmitting(false); }
   }
 
-  // Like a post
-  async function handleLikePost(post: CommunityPost) {
-    if (!db || !currentUserId) {
-      toast.info("Inicia sesión para interactuar con las publicaciones.");
-      return;
-    }
+  async function like(post: CommunityPost) {
+    if (!db || !currentUserId) { toast.info("Inicia sesión para reaccionar."); return; }
+    try { const result = await togglePostLike(db, post.id, currentUserId, post.likes || 0, post.likedBy || []); setPosts(previous => previous.map(item => item.id === post.id ? { ...item, ...result } : item)); }
+    catch { toast.error("No se pudo guardar tu reacción."); }
+  }
+
+  async function reply(post: CommunityPost) {
+    if (!db || !currentUserId) { toast.info("Inicia sesión para comentar."); return; }
+    const text = (replyDrafts[post.id] || "").trim(); if (!text) return;
     try {
-      const result = await togglePostLike(
-        db,
-        post.id,
-        currentUserId,
-        post.likes || 0,
-        post.likedBy || []
-      );
-      setPosts(prev =>
-        prev.map(p => (p.id === post.id ? { ...p, likes: result.likes, likedBy: result.likedBy } : p))
-      );
-    } catch (err) {
-      console.error(err);
-    }
+      const created = await addCommunityReply(db, post.id, post.replies || [], { authorId: currentUserId, authorName: currentUserName || "Gamer", authorPhoto: currentUserPhoto || undefined, content: text });
+      setPosts(previous => previous.map(item => item.id === post.id ? { ...item, replies: [...(item.replies || []), created] } : item));
+      setReplyDrafts(previous => ({ ...previous, [post.id]: "" }));
+    } catch { toast.error("No se pudo publicar el comentario."); }
   }
 
-  // Reply to a post
-  async function handleSendReply(postId: string, currentReplies: CommunityPost["replies"]) {
-    if (!db || !currentUserId) {
-      toast.info("Inicia sesión para responder.");
-      return;
-    }
-    const text = (replyDrafts[postId] || "").trim();
-    if (!text) return;
-
-    try {
-      const reply = await addCommunityReply(db, postId, currentReplies || [], {
-        authorId: currentUserId,
-        authorName: currentUserName || "Gamer",
-        authorPhoto: currentUserPhoto ?? undefined,
-        content: text,
-      });
-
-      setPosts(prev =>
-        prev.map(p => (p.id === postId ? { ...p, replies: [...(p.replies || []), reply] } : p))
-      );
-
-      setReplyDrafts(prev => ({ ...prev, [postId]: "" }));
-      toast.success("Comentario publicado");
-    } catch (err) {
-      console.error(err);
-      toast.error("No se pudo enviar el comentario.");
-    }
+  async function sharePost(post: CommunityPost) {
+    const url = `${window.location.href.split("#")[0]}#publicacion-${post.id}`;
+    const data = { title: `${post.authorName} en Mi Bóveda Gamer`, text: post.content, url };
+    try { if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(`${data.text}\n${url}`); toast.success("Enlace copiado"); } }
+    catch (error) { if ((error as DOMException)?.name !== "AbortError") toast.error("No se pudo compartir."); }
   }
 
-  const userInitial = (currentUserName?.[0] || "G").toUpperCase();
+  const navItems: Array<{ id: FeedFilter; label: string; icon: typeof Globe2 }> = [
+    { id: "all", label: "Para ti", icon: Sparkles }, { id: "questions", label: "Preguntas", icon: MessageCircle }, { id: "milestones", label: "Logros", icon: Trophy }, { id: "profiles", label: "Jugadores", icon: Users },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#07101f] text-slate-100 pb-16">
-      {/* Top Hero Banner */}
-      <div className="border-b border-white/8 bg-gradient-to-b from-violet-950/40 via-[#07101f] to-[#07101f] px-4 py-6 lg:px-8">
-        <div className="mx-auto max-w-[1400px]">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3.5">
-              <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-violet-600 shadow-[0_0_24px_rgba(6,182,212,0.3)]">
-                <Globe className="size-6 text-white" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-black tracking-tight sm:text-3xl text-white">Comunidad Gamer</h1>
-                  <Badge variant="outline" className="border-cyan-400/30 bg-cyan-500/10 text-cyan-300 text-xs">
-                    <Radio className="mr-1 size-3 text-cyan-400 animate-pulse" />
-                    En vivo
-                  </Badge>
-                </div>
-                <p className="mt-0.5 text-xs sm:text-sm text-slate-400">
-                  El feed social de gamers: comparte tus avances, recomienda joyas, consulta dudas y explora bóvedas públicas.
-                </p>
-              </div>
-            </div>
+    <div className="min-h-[calc(100vh-72px)] bg-[#07101f] text-slate-100">
+      <input ref={screenshotInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => void handleScreenshot(event.target.files?.[0])} />
+      <div className="mx-auto max-w-[1500px] px-4 py-5 lg:px-8">
+        <div className="mb-5 flex items-end justify-between gap-4">
+          <div><p className="text-sm font-semibold text-cyan-300">Tu espacio social</p><h1 className="mt-1 text-3xl font-black tracking-[-.04em]">Comunidad Gamer</h1><p className="mt-1 max-w-2xl text-sm text-slate-400">Comparte lo que juegas, tus capturas y esos momentos que merecen conversación.</p></div>
+          <Button onClick={() => openComposer()} className="hidden bg-violet-500 text-white hover:bg-violet-400 sm:flex"><Plus />Publicar</Button>
+        </div>
+        <div className="mb-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">{navItems.map(item => <Button key={item.id} size="sm" variant="outline" onClick={() => setFilter(item.id)} className={filter === item.id ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200" : "border-white/10"}><item.icon className="size-4" />{item.label}</Button>)}</div>
+        <div className="grid items-start gap-5 lg:grid-cols-[210px_minmax(0,700px)_minmax(260px,1fr)] xl:gap-7">
+          <aside className="sticky top-24 hidden space-y-2 lg:block">
+            {navItems.map(item => <button key={item.id} type="button" onClick={() => setFilter(item.id)} className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${filter === item.id ? "border border-cyan-400/20 bg-gradient-to-r from-violet-500/20 to-cyan-400/10 text-white" : "text-slate-400 hover:bg-white/[.05] hover:text-slate-100"}`}><item.icon className={`size-5 ${filter === item.id ? "text-cyan-300" : "text-slate-500"}`} />{item.label}</button>)}
+            <div className="my-3 border-t border-white/8" />
+            <button type="button" onClick={onBackToLibrary} className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold text-slate-400 transition hover:bg-white/[.05] hover:text-white"><Library className="size-5 text-violet-300" />Mi biblioteca</button>
+            {onOpenShareSettings && <button type="button" onClick={onOpenShareSettings} className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold text-slate-400 transition hover:bg-white/[.05] hover:text-white"><Globe2 className="size-5 text-cyan-300" />Perfil público</button>}
+          </aside>
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              {onOpenShareSettings && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onOpenShareSettings}
-                  className="border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 text-xs"
-                >
-                  <Share2 className="mr-1.5 size-3.5 text-cyan-300" />
-                  {publicProfileSettings?.isPublic ? "Mi Bóveda Pública" : "Hacer mi Bóveda Pública"}
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onBackToLibrary}
-                className="text-slate-300 hover:text-white text-xs"
-              >
-                <Library className="mr-1.5 size-3.5" />
-                Mi Biblioteca
-              </Button>
-            </div>
-          </div>
+          <main className="min-w-0 space-y-4">
+            {filter !== "profiles" && <section className="overflow-hidden rounded-3xl border border-white/10 bg-[#0b1628] shadow-[0_18px_50px_rgba(0,0,0,.18)]">
+              <div className="flex gap-3 p-4 sm:p-5">
+                <Avatar className="size-11 shrink-0 border border-white/15"><AvatarImage src={currentUserPhoto || undefined} alt={currentUserName || "Gamer"} /><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold text-white">{initials(currentUserName)}</AvatarFallback></Avatar>
+                <div className="min-w-0 flex-1">{composerOpen ? <div className="space-y-3">
+                  <Textarea autoFocus value={content} onChange={event => setContent(event.target.value)} placeholder="¿Qué está pasando en tu partida?" rows={3} maxLength={3000} className="resize-none border-0 bg-transparent p-0 text-base leading-7 shadow-none focus-visible:ring-0" />
+                  {selectedGame && <GameShareCard game={selectedGame} onRemove={() => setSelectedGameId("")} />}
+                  {attachmentUrl && <div className="relative overflow-hidden rounded-2xl border border-white/10"><img src={attachmentUrl} alt="Captura para publicar" className="max-h-[430px] w-full bg-black/30 object-contain" /><Button size="icon-sm" variant="secondary" aria-label="Quitar captura" onClick={() => setAttachmentUrl("")} className="absolute right-2 top-2 rounded-full bg-black/70"><X /></Button></div>}
+                  <div className="grid gap-2 sm:grid-cols-2"><label className="sr-only" htmlFor="community-game">Juego de tu biblioteca</label><select id="community-game" value={selectedGameId} onChange={event => setSelectedGameId(event.target.value)} className="h-9 min-w-0 rounded-xl border border-white/10 bg-[#07101f] px-3 text-sm text-slate-200 outline-none focus:border-cyan-400/50"><option value="">Adjuntar juego de mi biblioteca</option>{currentUserGames.map(game => <option key={game.id} value={game.id}>{game.title} · {game.platform}</option>)}</select><select aria-label="Tipo de publicación" value={category} onChange={event => setCategory(event.target.value as CommunityPost["category"])} className="h-9 rounded-xl border border-white/10 bg-[#07101f] px-3 text-sm text-slate-200 outline-none focus:border-cyan-400/50"><option value="Debate">Conversación</option><option value="Pregunta">Pregunta</option><option value="Recomendación">Recomendación</option><option value="Logro">Logro</option></select></div>
+                  <div className="flex items-center justify-between border-t border-white/8 pt-3"><div className="flex items-center gap-1"><Button variant="ghost" size="sm" onClick={() => screenshotInput.current?.click()} disabled={processingImage} className="text-slate-300 hover:text-cyan-200"><Camera className="text-cyan-300" />{processingImage ? "Preparando…" : "Captura"}</Button><Button variant="ghost" size="sm" onClick={() => setComposerOpen(false)} className="text-slate-400">Cancelar</Button></div><Button size="sm" onClick={() => void publish()} disabled={submitting || processingImage || (!content.trim() && !selectedGame && !attachmentUrl)} className="bg-cyan-400 font-bold text-slate-950 hover:bg-cyan-300"><Send />{submitting ? "Publicando…" : "Publicar"}</Button></div>
+                </div> : <button type="button" onClick={() => openComposer()} className="flex min-h-11 w-full items-center rounded-2xl bg-white/[.055] px-4 text-left text-sm text-slate-400 transition hover:bg-white/[.08] hover:text-slate-200">Comparte una partida, captura, pregunta o descubrimiento…</button>}</div>
+              </div>
+              {!composerOpen && <div className="grid grid-cols-3 border-t border-white/8"><ComposerAction icon={Gamepad2} label="Juego" onClick={() => openComposer("Recomendación")} /><ComposerAction icon={ImageIcon} label="Captura" onClick={() => { if (!currentUserId) return openComposer(); screenshotInput.current?.click(); }} /><ComposerAction icon={Trophy} label="Logro" onClick={() => openComposer("Logro")} /></div>}
+            </section>}
+            {filter === "profiles" ? <ProfilesExplorer profiles={visibleProfiles} loading={loadingProfiles} query={profileSearch} setQuery={setProfileSearch} currentUserId={currentUserId} onViewProfile={onViewProfile} /> : loadingPosts || loadingProfiles ? [1, 2, 3].map(item => <Skeleton key={item} className="h-56 rounded-3xl bg-white/5" />) : feed.length === 0 ? <section className="rounded-3xl border border-dashed border-white/12 px-6 py-14 text-center"><MessageCircle className="mx-auto size-9 text-slate-500" /><h2 className="mt-3 font-bold">Aquí puede empezar una buena conversación</h2><p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Comparte una partida o haz la primera pregunta.</p><Button className="mt-4 bg-violet-500 hover:bg-violet-400" onClick={() => openComposer()}><Plus />Crear publicación</Button></section> : feed.map(entry => entry.kind === "post" ? <PostCard key={`post-${entry.item.id}`} post={entry.item} currentUserId={currentUserId} activeReplyId={activeReplyId} replyDraft={replyDrafts[entry.item.id] || ""} currentUserName={currentUserName} currentUserPhoto={currentUserPhoto} onViewProfile={onViewProfile} onLike={() => void like(entry.item)} onShare={() => void sharePost(entry.item)} onToggleReplies={() => setActiveReplyId(activeReplyId === entry.item.id ? null : entry.item.id)} onReplyChange={value => setReplyDrafts(previous => ({ ...previous, [entry.item.id]: value }))} onReply={() => void reply(entry.item)} /> : <ActivityCard key={`activity-${entry.item.id}`} activity={entry.item} onViewProfile={onViewProfile} />)}
+          </main>
+
+          <aside className="sticky top-24 hidden space-y-4 xl:block">
+            <section className="rounded-3xl border border-white/8 bg-white/[.035] p-5"><div className="flex items-center justify-between"><h2 className="font-bold">Tu perfil gamer</h2><Badge className={publicProfileSettings?.isPublic ? "bg-emerald-400/10 text-emerald-300" : "bg-white/8 text-slate-400"}>{publicProfileSettings?.isPublic ? "Público" : "Privado"}</Badge></div><p className="mt-2 text-sm leading-6 text-slate-400">{publicProfileSettings?.isPublic ? "Tu biblioteca ya forma parte de la comunidad." : "Haz visible tu biblioteca para que otros jugadores descubran tus partidas."}</p>{onOpenShareSettings && <Button variant="outline" className="mt-4 w-full border-white/10" onClick={onOpenShareSettings}><Globe2 className="text-cyan-300" />{publicProfileSettings?.isPublic ? "Configurar perfil" : "Activar perfil público"}</Button>}</section>
+            <section className="rounded-3xl border border-white/8 bg-white/[.035] p-5"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-bold"><Users className="size-4 text-violet-300" />Jugadores</h2><button type="button" className="text-xs font-semibold text-cyan-300" onClick={() => setFilter("profiles")}>Ver todos</button></div><div className="mt-4 space-y-3">{profiles.slice(0, 4).map(profile => <button key={profile.userId} type="button" onClick={() => onViewProfile(profile.userId)} className="flex w-full items-center gap-3 text-left"><Avatar className="size-9 border border-white/10"><AvatarFallback className="bg-violet-500/15 text-violet-200">{initials(profile.handle)}</AvatarFallback></Avatar><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{profile.handle}</span><span className="block text-xs text-slate-500">{profile.stats.active} jugando · {profile.stats.done} terminados</span></span></button>)}{!profiles.length && <p className="text-sm text-slate-500">Aún no hay perfiles públicos.</p>}</div></section>
+            {trending.length > 0 && <section className="rounded-3xl border border-white/8 bg-white/[.035] p-5"><h2 className="flex items-center gap-2 font-bold"><Flame className="size-4 text-amber-300" />En la comunidad</h2><div className="mt-3 space-y-3">{trending.map(([title, count], index) => <div key={title} className="flex items-start gap-3"><span className="text-xs font-black text-slate-600">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{title}</span><span className="text-xs text-slate-500">{count} {count === 1 ? "jugador" : "jugadores"}</span></span></div>)}</div></section>}
+          </aside>
         </div>
       </div>
-
-      {/* Main Container - 2 Columns (Facebook Feed + Sidebar) */}
-      <main className="mx-auto max-w-[1400px] px-4 py-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* ========================================================= */}
-          {/* MAIN CENTRAL COLUMN: FACEBOOK-STYLE FEED (Col 8)         */}
-          {/* ========================================================= */}
-          <div className="lg:col-span-8 space-y-5">
-            {/* 1. FACEBOOK POST COMPOSER */}
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.07] to-white/[.03] p-4 sm:p-5 shadow-xl backdrop-blur-md">
-              <div className="flex items-start gap-3">
-                <Avatar className="size-10 border border-white/20 shrink-0">
-                  <AvatarImage src={currentUserPhoto ?? undefined} alt={currentUserName || "Gamer"} />
-                  <AvatarFallback className="bg-gradient-to-br from-violet-600 to-cyan-500 text-white font-bold text-sm">
-                    {userInitial}
-                  </AvatarFallback>
-                </Avatar>
-
-                <div className="flex-1 min-w-0">
-                  {!composerExpanded ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!currentUserId) {
-                          toast.info("Inicia sesión para publicar en la comunidad.");
-                          return;
-                        }
-                        setComposerExpanded(true);
-                      }}
-                      className="w-full text-left rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-sm text-slate-400 hover:bg-black/40 hover:text-slate-200 transition flex items-center justify-between"
-                    >
-                      <span>¿Qué estás jugando o qué quieres compartir hoy?</span>
-                      <Sparkles className="size-4 text-cyan-400 shrink-0" />
-                    </button>
-                  ) : (
-                    <div className="space-y-3">
-                      {/* Optional Title */}
-                      <Input
-                        value={postTitle}
-                        onChange={e => setPostTitle(e.target.value)}
-                        placeholder="Título o resumen (ej. ¿Vale la pena en 2026? / Boss derrotado)"
-                        className="border-white/10 bg-black/40 text-sm focus-visible:ring-cyan-500"
-                      />
-
-                      {/* Main Content */}
-                      <Textarea
-                        value={postContent}
-                        onChange={e => setPostContent(e.target.value)}
-                        placeholder="Escribe tu duda, reseña de juego, consejo para un boss, o debate con la comunidad..."
-                        rows={3}
-                        className="border-white/10 bg-black/40 text-sm leading-relaxed focus-visible:ring-cyan-500 resize-none"
-                        autoFocus
-                      />
-
-                      {/* Category Selector Chips */}
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[11px] font-semibold text-slate-400 mr-1">Tipo:</span>
-                        {(
-                          [
-                            { id: "Pregunta", label: "💬 Duda / Pregunta" },
-                            { id: "Recomendación", label: "💡 Recomendación" },
-                            { id: "Logro", label: "🏆 Logro / Hito" },
-                            { id: "Debate", label: "🔥 Debate Gamer" },
-                          ] as const
-                        ).map(cat => (
-                          <button
-                            key={cat.id}
-                            type="button"
-                            onClick={() => setPostCategory(cat.id)}
-                            className={`px-2.5 py-1 rounded-full text-xs font-semibold transition ${
-                              postCategory === cat.id
-                                ? "bg-gradient-to-r from-violet-600 to-cyan-600 text-white shadow-sm"
-                                : "bg-white/5 text-slate-300 hover:bg-white/10"
-                            }`}
-                          >
-                            {cat.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Optional Game and Platform Tags */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        <div className="relative">
-                          <Gamepad2 className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
-                          <Input
-                            value={postGame}
-                            onChange={e => setPostGame(e.target.value)}
-                            placeholder="Nombre del juego (opcional)"
-                            className="pl-8 text-xs border-white/10 bg-black/30 h-8"
-                          />
-                        </div>
-                        <div className="relative">
-                          <Tag className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
-                          <Input
-                            value={postPlatform}
-                            onChange={e => setPostPlatform(e.target.value)}
-                            placeholder="Plataforma (ej. PC, PS5, Switch)"
-                            className="pl-8 text-xs border-white/10 bg-black/30 h-8"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setComposerExpanded(false)}
-                          className="text-xs text-slate-400 hover:text-slate-200 h-8"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={handleCreatePost}
-                          disabled={submittingPost || !postContent.trim()}
-                          className="bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white font-bold text-xs h-8 px-4 shadow-[0_0_16px_rgba(139,92,246,0.3)]"
-                        >
-                          <Send className="mr-1.5 size-3.5" />
-                          {submittingPost ? "Publicando…" : "Publicar en el Muro"}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Quick Prompt Icons bar (Facebook-style) */}
-              {!composerExpanded && (
-                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-around text-xs text-slate-400">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostCategory("Pregunta");
-                      setComposerExpanded(true);
-                    }}
-                    className="flex items-center gap-1.5 hover:text-cyan-300 transition py-1 px-2 rounded-lg hover:bg-white/5"
-                  >
-                    <HelpCircle className="size-4 text-sky-400" />
-                    <span>Hacer Pregunta</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostCategory("Recomendación");
-                      setComposerExpanded(true);
-                    }}
-                    className="flex items-center gap-1.5 hover:text-emerald-300 transition py-1 px-2 rounded-lg hover:bg-white/5"
-                  >
-                    <Lightbulb className="size-4 text-emerald-400" />
-                    <span>Recomendar Juego</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostCategory("Logro");
-                      setComposerExpanded(true);
-                    }}
-                    className="flex items-center gap-1.5 hover:text-amber-300 transition py-1 px-2 rounded-lg hover:bg-white/5"
-                  >
-                    <Trophy className="size-4 text-amber-400" />
-                    <span>Compartir Logro</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostCategory("Debate");
-                      setComposerExpanded(true);
-                    }}
-                    className="flex items-center gap-1.5 hover:text-violet-300 transition py-1 px-2 rounded-lg hover:bg-white/5 hidden sm:flex"
-                  >
-                    <MessageSquare className="size-4 text-violet-400" />
-                    <span>Iniciar Debate</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 2. FEED FILTER CHIPS (Facebook / Twitter Feed Selector) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              {(
-                [
-                  { id: "all", label: "🔥 Todo el Muro", count: posts.length + activityFeed.length },
-                  { id: "posts", label: "💬 Publicaciones", count: posts.length },
-                  { id: "questions", label: "❓ Dudas", count: posts.filter(p => p.category === "Pregunta").length },
-                  { id: "recommendations", label: "💡 Recomendaciones", count: posts.filter(p => p.category === "Recomendación").length },
-                  { id: "milestones", label: "🏆 Logros y Muro", count: activityFeed.length },
-                  { id: "profiles", label: "👥 Explorar Bóvedas", count: profiles.length },
-                ] as const
-              ).map(tab => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setFeedFilter(tab.id)}
-                  className={`whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs font-semibold transition border ${
-                    feedFilter === tab.id
-                      ? "border-cyan-400/40 bg-gradient-to-r from-violet-600/40 to-cyan-500/40 text-cyan-200 shadow-sm"
-                      : "border-white/10 bg-white/[.04] text-slate-400 hover:text-white hover:bg-white/[.08]"
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  {tab.count > 0 && (
-                    <span className="ml-1.5 text-[10px] opacity-70">({tab.count})</span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* 3. FEED CONTENT STREAM */}
-            {feedFilter === "profiles" ? (
-              /* PROFILES EXPLORER GRID VIEW */
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="relative max-w-md flex-1">
-                    <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
-                    <Input
-                      value={searchProfile}
-                      onChange={e => setSearchProfile(e.target.value)}
-                      placeholder="Buscar jugador por nombre o consola..."
-                      className="border-white/10 bg-[#0b1628] pl-10 text-xs placeholder:text-slate-500 h-9"
-                    />
-                  </div>
-                  <span className="text-xs text-slate-400 font-mono">
-                    {filteredProfiles.length} colecciones públicas
-                  </span>
-                </div>
-
-                {loadingProfiles ? (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {[1, 2, 3, 4].map(i => (
-                      <Skeleton key={i} className="h-48 rounded-3xl bg-white/5" />
-                    ))}
-                  </div>
-                ) : filteredProfiles.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-white/10 p-10 text-center">
-                    <Archive className="mx-auto mb-2 size-10 text-slate-500" />
-                    <h3 className="font-bold text-slate-300">No se encontraron perfiles</h3>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Prueba con otro término de búsqueda o haz pública tu propia colección.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {filteredProfiles.map(prof => {
-                      const isCurrent = prof.userId === currentUserId;
-                      const initial = (prof.handle?.[0] || "G").toUpperCase();
-                      return (
-                        <div
-                          key={prof.userId}
-                          className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.06] to-white/[.02] p-4 shadow-lg transition hover:-translate-y-1 hover:border-cyan-400/40"
-                        >
-                          <div>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5">
-                                <Avatar className="size-11 border-2 border-cyan-400/30">
-                                  <AvatarFallback className="bg-gradient-to-br from-violet-600 to-cyan-500 font-bold text-white text-sm">
-                                    {initial}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <h3 className="font-bold text-slate-100 group-hover:text-cyan-300 transition text-sm">
-                                      {prof.handle}
-                                    </h3>
-                                    {isCurrent && (
-                                      <Badge variant="outline" className="text-[9px] border-cyan-400/40 text-cyan-300 px-1 py-0">
-                                        Tú
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-slate-400 line-clamp-1">
-                                    {prof.bio || "Bóveda gamer"}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300 text-[10px] px-1.5 py-0">
-                                Público
-                              </Badge>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-xl bg-black/25 p-2 text-center border border-white/5">
-                              <div>
-                                <span className="block text-[9px] text-slate-400">Juegos</span>
-                                <span className="font-bold text-xs text-slate-100">{prof.stats.total}</span>
-                              </div>
-                              <div>
-                                <span className="block text-[9px] text-slate-400">Jugando</span>
-                                <span className="font-bold text-xs text-cyan-300">{prof.stats.active}</span>
-                              </div>
-                              <div>
-                                <span className="block text-[9px] text-slate-400">Terminados</span>
-                                <span className="font-bold text-xs text-emerald-300">{prof.stats.done}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between">
-                            <span className="text-[10px] text-slate-500">
-                              {prof.stats.hours > 0 ? `${prof.stats.hours} h jugadas` : "Colección activa"}
-                            </span>
-                            <Button
-                              size="sm"
-                              onClick={() => onViewProfile(prof.userId)}
-                              className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs h-7 px-3"
-                            >
-                              Ver Bóveda
-                              <ArrowRight className="size-3 ml-1" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* UNIFIED STREAM: POSTS & ACTIVITY CARDS */
-              <div className="space-y-4">
-                {loadingPosts && loadingProfiles ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map(i => (
-                      <Skeleton key={i} className="h-44 rounded-3xl bg-white/5" />
-                    ))}
-                  </div>
-                ) : unifiedFeed.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-white/10 p-12 text-center">
-                    <MessageCircle className="mx-auto mb-3 size-10 text-slate-500" />
-                    <h3 className="font-bold text-slate-300 text-base">Aún no hay publicaciones en esta sección</h3>
-                    <p className="mt-1 text-xs text-slate-400 max-w-sm mx-auto">
-                      ¡Sé el primero en iniciar la conversación! Comparte lo que estás jugando o haz una pregunta a la comunidad.
-                    </p>
-                    <Button
-                      onClick={() => setComposerExpanded(true)}
-                      className="mt-4 bg-gradient-to-r from-violet-600 to-cyan-600 text-xs font-bold"
-                    >
-                      <Plus className="size-3.5 mr-1" />
-                      Crear primera publicación
-                    </Button>
-                  </div>
-                ) : (
-                  unifiedFeed.map(feedItem => {
-                    if (feedItem.kind === "activity") {
-                      const act = feedItem.item;
-                      return (
-                        <div
-                          key={act.id}
-                          className="rounded-3xl border border-white/8 bg-gradient-to-b from-white/[.04] to-white/[.01] p-4 shadow-md hover:border-white/15 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div
-                              className={`grid size-11 shrink-0 place-items-center rounded-2xl ${
-                                act.type === "completed"
-                                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                                  : "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
-                              }`}
-                            >
-                              {act.type === "completed" ? (
-                                <Trophy className="size-5" />
-                              ) : (
-                                <Gamepad2 className="size-5" />
-                              )}
-                            </div>
-
-                            <div className="min-w-0">
-                              <div className="text-sm text-slate-200">
-                                <button
-                                  type="button"
-                                  onClick={() => onViewProfile(act.userId)}
-                                  className="font-bold text-cyan-300 hover:underline inline mr-1"
-                                >
-                                  {act.handle}
-                                </button>
-                                <span className="text-slate-300">{act.detail}</span>
-                              </div>
-                              <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-white/10 text-slate-300">
-                                  {act.platform}
-                                </Badge>
-                                {act.rating && act.rating > 0 && (
-                                  <span className="flex items-center gap-1 text-amber-400 font-semibold text-[11px]">
-                                    <Star className="size-3 fill-amber-400" />
-                                    {act.rating}/10
-                                  </span>
-                                )}
-                                <span className="text-[10px] text-slate-500">
-                                  {formatTimeAgo(act.date)}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => onViewProfile(act.userId)}
-                            className="text-xs text-violet-300 hover:text-violet-200 self-end sm:self-center shrink-0 h-8"
-                          >
-                            Ver Bóveda
-                            <ExternalLink className="size-3.5 ml-1" />
-                          </Button>
-                        </div>
-                      );
-                    }
-
-                    // Kind === "post" (Facebook Post Card)
-                    const post = feedItem.item;
-                    const hasLiked = (post.likedBy || []).includes(currentUserId || "");
-                    const replies = post.replies || [];
-                    const isReplying = activeReplyId === post.id;
-                    const replyText = replyDrafts[post.id] || "";
-
-                    const categoryBadgeClass =
-                      post.category === "Pregunta"
-                        ? "border-sky-400/40 bg-sky-500/10 text-sky-300"
-                        : post.category === "Recomendación"
-                        ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
-                        : post.category === "Logro"
-                        ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
-                        : "border-violet-400/40 bg-violet-500/10 text-violet-300";
-
-                    return (
-                      <article
-                        key={post.id}
-                        className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.06] to-white/[.02] p-5 shadow-xl space-y-3.5 backdrop-blur-md"
-                      >
-                        {/* Facebook Post Header */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => onViewProfile(post.authorId)}
-                              className="group shrink-0"
-                            >
-                              <Avatar className="size-10 border border-white/20 transition group-hover:border-cyan-400">
-                                <AvatarImage src={post.authorPhoto} />
-                                <AvatarFallback className="bg-gradient-to-br from-violet-600 to-cyan-600 text-white font-bold text-xs">
-                                  {(post.authorName?.[0] || "G").toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                            </button>
-
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => onViewProfile(post.authorId)}
-                                  className="font-bold text-sm text-slate-100 hover:text-cyan-300 transition text-left"
-                                >
-                                  {post.authorName}
-                                </button>
-                                {post.authorId === currentUserId && (
-                                  <Badge variant="outline" className="text-[9px] border-cyan-400/30 text-cyan-300 px-1 py-0">
-                                    Tú
-                                  </Badge>
-                                )}
-                              </div>
-                              <span className="text-[11px] text-slate-400 block -mt-0.5">
-                                {formatTimeAgo(post.createdAt)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Badge variant="outline" className={`text-[10px] font-semibold ${categoryBadgeClass}`}>
-                              {post.category}
-                            </Badge>
-                            {post.platform && (
-                              <Badge variant="secondary" className="text-[10px] bg-white/10 text-slate-300">
-                                {post.platform}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Post Content */}
-                        <div className="space-y-1.5">
-                          {post.gameTitle && (
-                            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-xs font-bold text-violet-300">
-                              <Gamepad2 className="size-3" />
-                              <span>{post.gameTitle}</span>
-                            </div>
-                          )}
-
-                          {post.title && post.title !== post.content && (
-                            <h3 className="font-extrabold text-base text-slate-100 leading-snug">
-                              {post.title}
-                            </h3>
-                          )}
-
-                          <p className="text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
-                            {post.content}
-                          </p>
-                        </div>
-
-                        {/* Facebook Action Bar (Like / Comment / View Vault) */}
-                        <div className="pt-2 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-                          <div className="flex items-center gap-2">
-                            {/* Like Button */}
-                            <button
-                              type="button"
-                              onClick={() => handleLikePost(post)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium transition ${
-                                hasLiked
-                                  ? "text-rose-400 bg-rose-500/15 font-bold shadow-sm"
-                                  : "text-slate-400 hover:text-rose-300 hover:bg-white/5"
-                              }`}
-                            >
-                              <Heart className={`size-4 ${hasLiked ? "fill-rose-400" : ""}`} />
-                              <span>{post.likes > 0 ? post.likes : "Me gusta"}</span>
-                            </button>
-
-                            {/* Comment Button */}
-                            <button
-                              type="button"
-                              onClick={() => setActiveReplyId(isReplying ? null : post.id)}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium transition ${
-                                isReplying
-                                  ? "bg-white/10 text-cyan-300 font-bold"
-                                  : "hover:bg-white/5 text-slate-400 hover:text-slate-200"
-                              }`}
-                            >
-                              <MessageCircle className="size-4" />
-                              <span>
-                                {replies.length > 0
-                                  ? `${replies.length} comentario${replies.length === 1 ? "" : "s"}`
-                                  : "Comentar"}
-                              </span>
-                            </button>
-                          </div>
-
-                          {/* Author Vault Link */}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => onViewProfile(post.authorId)}
-                            className="h-8 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 px-2"
-                          >
-                            <span>Ver Bóveda</span>
-                            <ArrowRight className="size-3.5 ml-1" />
-                          </Button>
-                        </div>
-
-                        {/* Facebook Comments Section */}
-                        {isReplying && (
-                          <div className="pt-3 border-t border-white/5 space-y-3">
-                            {replies.length > 0 && (
-                              <div className="space-y-2.5">
-                                {replies.map(reply => (
-                                  <div key={reply.id} className="flex items-start gap-2.5 text-xs">
-                                    <Avatar className="size-7 border border-white/10 shrink-0 mt-0.5">
-                                      <AvatarImage src={reply.authorPhoto} />
-                                      <AvatarFallback className="bg-violet-600/30 text-white font-bold text-[10px]">
-                                        {(reply.authorName?.[0] || "G").toUpperCase()}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1 rounded-2xl bg-black/30 border border-white/5 px-3 py-2">
-                                      <div className="flex items-center justify-between mb-0.5">
-                                        <span className="font-bold text-slate-200 text-[11px]">
-                                          {reply.authorName}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500">
-                                          {formatTimeAgo(reply.createdAt)}
-                                        </span>
-                                      </div>
-                                      <p className="text-slate-300 leading-relaxed text-xs">
-                                        {reply.content}
-                                      </p>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Inline Reply Input */}
-                            <div className="flex items-center gap-2 pt-1">
-                              <Avatar className="size-7 border border-white/10 shrink-0">
-                                <AvatarImage src={currentUserPhoto ?? undefined} />
-                                <AvatarFallback className="bg-gradient-to-br from-violet-600 to-cyan-500 text-white font-bold text-[10px]">
-                                  {userInitial}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="relative flex-1">
-                                <Input
-                                  value={replyText}
-                                  onChange={e =>
-                                    setReplyDrafts(prev => ({ ...prev, [post.id]: e.target.value }))
-                                  }
-                                  onKeyDown={e => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      void handleSendReply(post.id, replies);
-                                    }
-                                  }}
-                                  placeholder="Escribe un comentario o respuesta..."
-                                  className="border-white/10 bg-black/40 text-xs pr-16 h-8 focus-visible:ring-cyan-500"
-                                />
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleSendReply(post.id, replies)}
-                                  disabled={!replyText.trim()}
-                                  className="absolute right-1 top-1/2 -translate-y-1/2 h-6 px-2 text-[10px] font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-                                >
-                                  Enviar
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* ========================================================= */}
-          {/* RIGHT SIDEBAR COLUMN: GAMERS & VAULTS (Col 4)             */}
-          {/* ========================================================= */}
-          <div className="lg:col-span-4 space-y-5">
-            {/* Widget 1: Tu Bóveda Pública Status */}
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.06] to-white/[.02] p-5 shadow-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                  <Globe className="size-4 text-cyan-400" />
-                  Tu Bóveda Pública
-                </h3>
-                {publicProfileSettings?.isPublic ? (
-                  <Badge className="bg-emerald-500/20 border-emerald-500/40 text-emerald-300 text-[10px]">
-                    Activa
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="border-slate-600 text-slate-400 text-[10px]">
-                    Privada
-                  </Badge>
-                )}
-              </div>
-
-              <p className="text-xs text-slate-400 leading-relaxed">
-                {publicProfileSettings?.isPublic
-                  ? "Tu colección gamer es visible en la comunidad. Otros jugadores pueden explorar tus juegos, horas y avances."
-                  : "Tu colección es privada. Hazla pública para que otros gamers descubran tus juegos y progreso."}
-              </p>
-
-              <div className="flex items-center gap-2 pt-1">
-                {currentUserId && publicProfileSettings?.isPublic && (
-                  <Button
-                    size="sm"
-                    onClick={() => onViewProfile(currentUserId)}
-                    className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs h-8"
-                  >
-                    Ver mi Bóveda
-                  </Button>
-                )}
-                {onOpenShareSettings && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onOpenShareSettings}
-                    className="flex-1 border-white/15 hover:bg-white/5 text-slate-200 text-xs h-8"
-                  >
-                    {publicProfileSettings?.isPublic ? "Configurar" : "Hacer Pública"}
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {/* Widget 2: Gamers Destacados / Explorador */}
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.06] to-white/[.02] p-5 shadow-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                  <Users className="size-4 text-violet-400" />
-                  Gamers de la Comunidad
-                </h3>
-                <span className="text-[11px] text-slate-400 font-mono">
-                  {profiles.length}
-                </span>
-              </div>
-
-              {/* Mini Search */}
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
-                <Input
-                  value={searchProfile}
-                  onChange={e => setSearchProfile(e.target.value)}
-                  placeholder="Buscar gamer o consola..."
-                  className="pl-8 text-xs border-white/10 bg-black/30 h-8"
-                />
-              </div>
-
-              {/* Profiles list */}
-              {loadingProfiles ? (
-                <div className="space-y-2">
-                  {[1, 2, 3].map(i => (
-                    <Skeleton key={i} className="h-14 rounded-2xl bg-white/5" />
-                  ))}
-                </div>
-              ) : filteredProfiles.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-2">
-                  No se encontraron jugadores.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {filteredProfiles.slice(0, 5).map(prof => {
-                    const initial = (prof.handle?.[0] || "G").toUpperCase();
-                    return (
-                      <div
-                        key={prof.userId}
-                        className="flex items-center justify-between gap-2 p-2 rounded-2xl bg-white/[.02] border border-white/5 hover:border-white/10 transition"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Avatar className="size-8 border border-white/15 shrink-0">
-                            <AvatarFallback className="bg-gradient-to-br from-violet-600 to-cyan-600 text-white font-bold text-xs">
-                              {initial}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0">
-                            <h4 className="font-bold text-xs text-slate-200 truncate">
-                              {prof.handle}
-                            </h4>
-                            <p className="text-[10px] text-slate-400 truncate">
-                              {prof.stats.total} juegos • {prof.stats.done} terminados
-                            </p>
-                          </div>
-                        </div>
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => onViewProfile(prof.userId)}
-                          className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 h-7 px-2 shrink-0"
-                        >
-                          Ver
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {profiles.length > 5 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setFeedFilter("profiles")}
-                  className="w-full text-xs border-white/10 hover:bg-white/5 text-slate-300 h-8"
-                >
-                  Explorar todas las Bóvedas ({profiles.length})
-                </Button>
-              )}
-            </div>
-
-            {/* Widget 3: Juegos Populares / En Tendencia */}
-            {trendingGames.length > 0 && (
-              <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/[.06] to-white/[.02] p-5 shadow-lg space-y-3">
-                <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                  <Flame className="size-4 text-amber-400" />
-                  Juegos en Tendencia
-                </h3>
-                <div className="space-y-2">
-                  {trendingGames.map(game => (
-                    <div
-                      key={game.title}
-                      className="flex items-center justify-between gap-2 p-2 rounded-xl bg-white/[.02] border border-white/5 text-xs"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Gamepad2 className="size-4 text-cyan-400 shrink-0" />
-                        <span className="font-medium text-slate-200 truncate">
-                          {game.title}
-                        </span>
-                      </div>
-                      <Badge variant="secondary" className="text-[10px] bg-white/10 text-slate-300 shrink-0">
-                        {game.count} {game.count === 1 ? "gamer" : "gamers"}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
     </div>
   );
+}
+
+function ComposerAction({ icon: Icon, label, onClick }: { icon: typeof Gamepad2; label: string; onClick: () => void }) { return <button type="button" onClick={onClick} className="flex items-center justify-center gap-2 py-3 text-sm font-semibold text-slate-400 transition hover:bg-white/[.04] hover:text-white"><Icon className="size-4 text-cyan-300" />{label}</button>; }
+
+function GameShareCard({ game, onRemove }: { game: Game; onRemove: () => void }) {
+  return <div className="flex gap-3 rounded-2xl border border-violet-400/20 bg-violet-500/8 p-3"><div className="h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-white/5">{game.coverUrl ? <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${JSON.stringify(game.coverUrl).slice(1, -1)})` }} /> : <div className="grid h-full place-items-center"><Gamepad2 className="text-slate-500" /></div>}</div><div className="min-w-0 flex-1"><p className="truncate font-bold">{game.title}</p><p className="mt-1 text-xs text-slate-400">{game.platform} · {game.status}</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400" style={{ width: `${game.progress}%` }} /></div><p className="mt-1 text-[11px] text-slate-500">{game.progress}% completado</p></div><Button size="icon-sm" variant="ghost" aria-label="Quitar juego" onClick={onRemove}><X /></Button></div>;
+}
+
+function PostCard({ post, currentUserId, activeReplyId, replyDraft, currentUserName, currentUserPhoto, onViewProfile, onLike, onShare, onToggleReplies, onReplyChange, onReply }: { post: CommunityPost; currentUserId?: string | null; activeReplyId: string | null; replyDraft: string; currentUserName?: string | null; currentUserPhoto?: string | null; onViewProfile: (id: string) => void; onLike: () => void; onShare: () => void; onToggleReplies: () => void; onReplyChange: (value: string) => void; onReply: () => void }) {
+  const liked = (post.likedBy || []).includes(currentUserId || ""); const replies = post.replies || []; const repliesOpen = activeReplyId === post.id;
+  return <article id={`publicacion-${post.id}`} className="scroll-mt-28 overflow-hidden rounded-3xl border border-white/10 bg-[#0b1628] shadow-[0_18px_50px_rgba(0,0,0,.16)]"><div className="p-4 sm:p-5">
+    <header className="flex items-start gap-3"><button type="button" onClick={() => onViewProfile(post.authorId)}><Avatar className="size-11 border border-white/15"><AvatarImage src={post.authorPhoto} /><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold">{initials(post.authorName)}</AvatarFallback></Avatar></button><div className="min-w-0 flex-1"><button type="button" onClick={() => onViewProfile(post.authorId)} className="font-bold hover:text-cyan-300">{post.authorName}</button><div className="flex items-center gap-2 text-xs text-slate-500"><span>{timeAgo(post.createdAt)}</span><span>·</span><span>{post.category === "Debate" ? "Conversación" : post.category}</span></div></div>{post.authorId === currentUserId && <Badge variant="outline" className="border-cyan-400/20 text-cyan-300">Tú</Badge>}</header>
+    <p className="mt-4 whitespace-pre-wrap text-[0.98rem] leading-7 text-slate-200">{post.content}</p>
+    {post.sharedGame && <div className="mt-4 flex overflow-hidden rounded-2xl border border-white/10 bg-[#07101f]"><div className="w-24 shrink-0 bg-white/5 sm:w-28">{post.sharedGame.coverUrl ? <div className="h-full min-h-32 bg-cover bg-center" style={{ backgroundImage: `url(${JSON.stringify(post.sharedGame.coverUrl).slice(1, -1)})` }} /> : <div className="grid h-full min-h-32 place-items-center"><Gamepad2 className="size-7 text-slate-600" /></div>}</div><div className="min-w-0 flex-1 p-4"><Badge className="bg-violet-400/10 text-violet-300">De mi biblioteca</Badge><h3 className="mt-2 truncate text-lg font-black">{post.sharedGame.title}</h3><p className="text-sm text-slate-400">{post.sharedGame.platform} · {post.sharedGame.status}</p><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-gradient-to-r from-violet-500 to-cyan-400" style={{ width: `${post.sharedGame.progress}%` }} /></div><p className="mt-1 text-xs text-slate-500">{post.sharedGame.progress}% · {post.sharedGame.hours} h</p></div></div>}
+    {post.attachmentUrl && <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/30"><img src={post.attachmentUrl} alt={`Captura compartida por ${post.authorName}`} className="max-h-[560px] w-full object-contain" /></div>}
+    <div className="mt-4 flex items-center justify-between border-t border-white/8 pt-2"><button type="button" onClick={onLike} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition hover:bg-white/5 ${liked ? "text-rose-400" : "text-slate-400"}`}><Heart className={`size-4 ${liked ? "fill-current" : ""}`} />{post.likes || "Me gusta"}</button><button type="button" onClick={onToggleReplies} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-400 transition hover:bg-white/5 hover:text-white"><MessageCircle className="size-4" />{replies.length || "Comentar"}</button><button type="button" onClick={onShare} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-400 transition hover:bg-white/5 hover:text-white"><Share2 className="size-4" />Compartir</button></div>
+    {repliesOpen && <div className="mt-3 space-y-3 border-t border-white/8 pt-4">{replies.map(item => <div key={item.id} className="flex gap-2"><Avatar className="size-8"><AvatarImage src={item.authorPhoto} /><AvatarFallback className="bg-white/8 text-xs">{initials(item.authorName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1 rounded-2xl bg-white/[.045] px-3 py-2"><div className="flex justify-between gap-2"><span className="text-sm font-bold">{item.authorName}</span><span className="text-[11px] text-slate-500">{timeAgo(item.createdAt)}</span></div><p className="mt-0.5 text-sm leading-6 text-slate-300">{item.content}</p></div></div>)}<div className="flex gap-2"><Avatar className="size-8"><AvatarImage src={currentUserPhoto || undefined} /><AvatarFallback className="bg-violet-500/20 text-xs">{initials(currentUserName)}</AvatarFallback></Avatar><div className="relative flex-1"><Input value={replyDraft} onChange={event => onReplyChange(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); onReply(); } }} placeholder="Escribe una respuesta…" className="h-9 border-white/10 bg-[#07101f] pr-10" /><Button size="icon-sm" onClick={onReply} disabled={!replyDraft.trim()} className="absolute right-1 top-1/2 -translate-y-1/2 bg-cyan-400 text-slate-950 hover:bg-cyan-300"><Send /></Button></div></div></div>}
+  </div></article>;
+}
+
+function ActivityCard({ activity, onViewProfile }: { activity: ActivityEvent; onViewProfile: (id: string) => void }) { return <article className="flex gap-4 rounded-3xl border border-white/8 bg-white/[.035] p-4"><div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-400/10 text-emerald-300"><Trophy className="size-5" /></div><div className="min-w-0 flex-1"><p className="text-sm leading-6 text-slate-300"><button type="button" onClick={() => onViewProfile(activity.userId)} className="font-bold text-white hover:text-cyan-300">{activity.handle}</button> avanzó en <strong className="text-white">{activity.gameTitle}</strong></p><p className="mt-1 text-xs text-slate-500">{activity.platform} · {activity.progress}% · {timeAgo(activity.date)}</p></div></article>; }
+
+function ProfilesExplorer({ profiles, loading, query, setQuery, currentUserId, onViewProfile }: { profiles: PublicProfileData[]; loading: boolean; query: string; setQuery: (value: string) => void; currentUserId?: string | null; onViewProfile: (id: string) => void }) {
+  return <section className="space-y-4"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar jugador, consola o biografía…" className="h-11 border-white/10 bg-[#0b1628] pl-10" /></div>{loading ? [1, 2, 3].map(item => <Skeleton key={item} className="h-36 rounded-3xl bg-white/5" />) : profiles.length === 0 ? <div className="rounded-3xl border border-dashed border-white/10 py-14 text-center"><Archive className="mx-auto size-9 text-slate-600" /><p className="mt-3 text-slate-400">No encontramos jugadores con esa búsqueda.</p></div> : <div className="grid gap-4 sm:grid-cols-2">{profiles.map(profile => <button key={profile.userId} type="button" onClick={() => onViewProfile(profile.userId)} className="rounded-3xl border border-white/10 bg-[#0b1628] p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/30"><div className="flex items-center gap-3"><Avatar className="size-12 border border-white/15"><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold">{initials(profile.handle)}</AvatarFallback></Avatar><span className="min-w-0"><span className="flex items-center gap-2 font-bold">{profile.handle}{profile.userId === currentUserId && <Badge variant="outline" className="border-cyan-400/20 text-cyan-300">Tú</Badge>}</span><span className="mt-0.5 block line-clamp-1 text-xs text-slate-500">{profile.bio || "Colección pública"}</span></span></div><div className="mt-4 grid grid-cols-3 rounded-2xl bg-white/[.035] p-3 text-center"><span><strong className="block">{profile.stats.total}</strong><small className="text-slate-500">juegos</small></span><span><strong className="block text-cyan-300">{profile.stats.active}</strong><small className="text-slate-500">jugando</small></span><span><strong className="block text-emerald-300">{profile.stats.done}</strong><small className="text-slate-500">terminados</small></span></div></button>)}</div>}</section>;
 }
