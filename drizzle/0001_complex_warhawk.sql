@@ -1,0 +1,1 @@
+CREATE INDEX `idx_games_user_updated` ON `games` (`user_id`,`updated_at`);
