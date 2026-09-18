@@ -147,7 +147,7 @@ export function GameDashboard() {
   const [importing, setImporting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [profilesDialogOpen, setProfilesDialogOpen] = useState(false);
-  const [currentNavTab, setCurrentNavTab] = useState<"library" | "community">("library");
+  const [currentNavTab, setCurrentNavTab] = useState<"library" | "community">("community");
   const [publicProfileSettings, setPublicProfileSettings] = useState<PublicProfileSettings>(
     defaultProfileSettings
   );
@@ -917,16 +917,6 @@ export function GameDashboard() {
             <Button
               variant="ghost"
               className={`flex-1 md:flex-none font-semibold ${
-                currentNavTab === "library" ? "bg-white/10 text-white shadow-sm" : "text-slate-300 hover:text-white"
-              }`}
-              onClick={() => setCurrentNavTab("library")}
-            >
-              <Library className="mr-1.5 size-4 text-violet-300" />
-              Biblioteca
-            </Button>
-            <Button
-              variant="ghost"
-              className={`flex-1 md:flex-none font-semibold ${
                 currentNavTab === "community"
                   ? "bg-gradient-to-r from-violet-600/30 to-cyan-500/30 text-cyan-200 border border-cyan-400/30 shadow-sm"
                   : "text-slate-300 hover:text-white"
@@ -935,6 +925,16 @@ export function GameDashboard() {
             >
               <Globe className="mr-1.5 size-4 text-cyan-300" />
               Comunidad Gamer
+            </Button>
+            <Button
+              variant="ghost"
+              className={`flex-1 md:flex-none font-semibold ${
+                currentNavTab === "library" ? "bg-white/10 text-white shadow-sm" : "text-slate-300 hover:text-white"
+              }`}
+              onClick={() => setCurrentNavTab("library")}
+            >
+              <Library className="mr-1.5 size-4 text-violet-300" />
+              Mi Biblioteca
             </Button>
             <Button
               variant="ghost"
