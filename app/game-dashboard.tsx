@@ -667,6 +667,31 @@ export function GameDashboard() {
     }
   }
 
+  async function deleteSession(game: Game, sessionId: string) {
+    if (!user || !db) return;
+    const target = game.sessions?.find(s => s.id === sessionId);
+    if (!target) return;
+    const sessions = (game.sessions ?? []).filter(s => s.id !== sessionId);
+    const hours = Math.max(0, Math.round((game.hours - (target.hours || 0)) * 10) / 10);
+    const updatedAt = new Date().toISOString();
+    try {
+      await updateDoc(doc(db, "users", user.uid, "games", game.id), {
+        sessions,
+        hours,
+        updatedAt: serverTimestamp(),
+      });
+      const next = { ...game, sessions, hours, updatedAt };
+      const nextGames = games.map(item => (item.id === game.id ? next : item));
+      setGames(nextGames);
+      setSelectedGame(current => (current?.id === game.id ? next : current));
+      void syncPublic(nextGames);
+      toast.success("Sesión eliminada");
+    } catch (error) {
+      console.error(error);
+      toast.error("No pudimos eliminar la sesión.");
+    }
+  }
+
   function downloadBackup(kind: "json" | "csv") {
     const date = new Date().toISOString().slice(0, 10);
     const name = `mi-boveda-gamer-${date}.${kind}`;
@@ -1412,6 +1437,8 @@ export function GameDashboard() {
             openEdit(selectedGame);
           }}
           addSession={session => addSession(selectedGame, session)}
+          deleteSession={sessionId => deleteSession(selectedGame, sessionId)}
+          quickUpdate={(changes, message) => quickUpdate(selectedGame, changes, message)}
         />
       )}
 
