@@ -2,9 +2,7 @@
 
 # dependencies
 /node_modules
-**/node_modules/
-functions/lib/
-functions/.sites-runtime/
+/functions/
 /.pnp
 .pnp.*
 .yarn/*
