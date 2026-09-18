@@ -6,9 +6,7 @@ import {
   Check,
   Copy,
   Download,
-  ExternalLink,
   Eye,
-  EyeOff,
   Globe,
   ImageIcon,
   Lock,
@@ -30,7 +28,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
   defaultProfileSettings,
   generateLibrarySummaryMarkdown,
@@ -96,7 +93,9 @@ export function ShareDialog({
   const privateGamesCount = games.filter(g => g.isPrivate).length;
 
   // Sync initial settings if savedSettings change
-  useEffect(() => {
+  const [prevSavedSettings, setPrevSavedSettings] = useState(savedSettings);
+  if (savedSettings !== prevSavedSettings) {
+    setPrevSavedSettings(savedSettings);
     if (savedSettings) {
       setSettings(prev => ({
         ...prev,
@@ -104,7 +103,7 @@ export function ShareDialog({
         handle: savedSettings.handle || prev.handle || defaultHandle,
       }));
     }
-  }, [savedSettings, defaultHandle]);
+  }
 
   // Render social card when card tab becomes active
   useEffect(() => {

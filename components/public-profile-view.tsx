@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Firestore } from "firebase/firestore";
 import {
   Archive,
-  BarChart3,
   CalendarDays,
   ChevronRight,
   Clock3,
@@ -16,7 +15,6 @@ import {
   Library,
   ListFilter,
   Search,
-  Share2,
   ShieldCheck,
   Star,
   Target,
@@ -30,7 +28,6 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -86,9 +83,11 @@ export function PublicProfileView({
   isOwner = false,
   onExitPreview,
 }: PublicProfileViewProps) {
-  const [profile, setProfile] = useState<PublicProfileData | null>(initialData ?? null);
-  const [loading, setLoading] = useState(!initialData);
-  const [error, setError] = useState(false);
+  const [fetchedProfile, setFetchedProfile] = useState<PublicProfileData | null>(null);
+  const [loading, setLoading] = useState(() => !initialData && Boolean(db && userId));
+  const [error, setError] = useState(() => !initialData && (!db || !userId));
+
+  const profile = initialData ?? fetchedProfile;
 
   // Filters & Search
   const [query, setQuery] = useState("");
@@ -99,25 +98,17 @@ export function PublicProfileView({
   const [selectedGame, setSelectedGame] = useState<PublicGame | null>(null);
 
   useEffect(() => {
-    if (initialData) {
-      setProfile(initialData);
-      setLoading(false);
-      return;
-    }
-    if (!db || !userId) {
-      setLoading(false);
-      setError(true);
+    if (initialData || !db || !userId) {
       return;
     }
     let isMounted = true;
-    setLoading(true);
     fetchPublicProfileFromFirestore(db, userId)
       .then(data => {
         if (!isMounted) return;
         if (!data) {
           setError(true);
         } else {
-          setProfile(data);
+          setFetchedProfile(data);
         }
       })
       .catch(() => {

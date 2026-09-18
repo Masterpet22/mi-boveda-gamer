@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, deleteDoc, serverTimestamp, type Firestore } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, type Firestore } from "firebase/firestore";
 
 export interface PublicProfileSettings {
   isPublic: boolean;

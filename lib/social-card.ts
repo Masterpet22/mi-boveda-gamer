@@ -186,7 +186,7 @@ export async function renderGamerSocialCard(
     ...data.games.filter(g => g.status !== "Jugando"),
   ].slice(0, 3);
 
-  let gameY = contentY + 16;
+  const gameY = contentY + 16;
   const gameCardHeight = 88;
   const gameCardGap = 12;
 
