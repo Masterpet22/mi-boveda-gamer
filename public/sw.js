@@ -1,8 +1,12 @@
-const CACHE = "mi-boveda-gamer-v1";
-const APP_ROOT = "/mi-boveda-gamer/";
+const CACHE = "mi-boveda-gamer-v2";
+const APP_ROOT = new URL("./", self.registration.scope).pathname;
 
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.add(APP_ROOT)));
+  event.waitUntil(
+    caches.open(CACHE).then(cache =>
+      cache.add(APP_ROOT).catch(error => console.warn("PWA root cache failed", error))
+    )
+  );
   self.skipWaiting();
 });
 

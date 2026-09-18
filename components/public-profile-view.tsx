@@ -211,7 +211,7 @@ export function PublicProfileView({
                 className="bg-violet-500 text-white hover:bg-violet-400"
                 onClick={() => {
                   if (typeof window !== "undefined") {
-                    window.location.href = window.location.pathname.replace(/\/$/, "");
+                    window.location.href = window.location.pathname.replace(/\/$/, "") || "/";
                   }
                 }}
               >
@@ -285,7 +285,7 @@ export function PublicProfileView({
                 className="bg-violet-500 text-white hover:bg-violet-400"
                 onClick={() => {
                   if (typeof window !== "undefined") {
-                    window.location.href = window.location.pathname.replace(/\/$/, "");
+                    window.location.href = window.location.pathname.replace(/\/$/, "") || "/";
                   }
                 }}
               >
