@@ -19,6 +19,8 @@ interface CommunityViewProps {
   currentUserName?: string | null;
   currentUserPhoto?: string | null;
   currentUserGames?: Game[];
+  gameToShare?: Game | null;
+  onGameShareConsumed?: () => void;
   publicProfileSettings?: PublicProfileSettings;
   onOpenShareSettings?: () => void;
   onViewProfile: (userId: string) => void;
@@ -75,7 +77,7 @@ async function compressScreenshot(file: File): Promise<string> {
   return result;
 }
 
-export function CommunityView({ db, currentUserId, currentUserName = "Gamer", currentUserPhoto, currentUserGames = [], publicProfileSettings, onOpenShareSettings, onViewProfile, onBackToLibrary }: CommunityViewProps) {
+export function CommunityView({ db, currentUserId, currentUserName = "Gamer", currentUserPhoto, currentUserGames = [], gameToShare, onGameShareConsumed, publicProfileSettings, onOpenShareSettings, onViewProfile, onBackToLibrary }: CommunityViewProps) {
   const screenshotInput = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<FeedFilter>("all");
   const [profiles, setProfiles] = useState<PublicProfileData[]>([]);
@@ -105,6 +107,14 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
     });
     return () => { mounted = false; };
   }, [db]);
+
+  useEffect(() => {
+    if (!gameToShare) return;
+    setSelectedGameId(gameToShare.id);
+    setCategory(["Terminado", "Completado"].includes(gameToShare.status) ? "Logro" : "Debate");
+    setComposerOpen(true);
+    onGameShareConsumed?.();
+  }, [gameToShare, onGameShareConsumed]);
 
   const selectedGame = currentUserGames.find(game => game.id === selectedGameId);
   const activities = useMemo<ActivityEvent[]>(() => profiles.flatMap(profile => profile.games.filter(game => game.status === "Jugando" || ["Terminado", "Completado"].includes(game.status)).map(game => ({ id: `${profile.userId}-${game.id}-${game.updatedAt}`, userId: profile.userId, handle: profile.handle, gameTitle: game.title, platform: game.platform, date: game.finishedAt || game.updatedAt, progress: game.progress }))).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20), [profiles]);

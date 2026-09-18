@@ -146,6 +146,7 @@ export function GameDashboard() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [communityShareGame, setCommunityShareGame] = useState<Game | null>(null);
   const [profilesDialogOpen, setProfilesDialogOpen] = useState(false);
   const [currentNavTab, setCurrentNavTab] = useState<"library" | "community">("community");
   const [publicProfileSettings, setPublicProfileSettings] = useState<PublicProfileSettings>(
@@ -160,6 +161,13 @@ export function GameDashboard() {
   });
 
   const backupInput = useRef<HTMLInputElement>(null);
+
+  function shareGameInCommunity(game: Game) {
+    setCommunityShareGame(game);
+    setSelectedGame(null);
+    setCurrentNavTab("community");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   useEffect(() => {
     if (!auth || !db) {
@@ -1072,6 +1080,8 @@ export function GameDashboard() {
           currentUserName={profileName}
           currentUserPhoto={user.photoURL}
           currentUserGames={games}
+          gameToShare={communityShareGame}
+          onGameShareConsumed={() => setCommunityShareGame(null)}
           publicProfileSettings={publicProfileSettings}
           onOpenShareSettings={() => setShareOpen(true)}
           onViewProfile={targetUid => setPublicViewUid(targetUid)}
@@ -1321,6 +1331,7 @@ export function GameDashboard() {
                   (game.lists ?? []).includes("Favoritos") ? "Quitado de favoritos" : "Añadido a favoritos"
                 )
               }
+              share={shareGameInCommunity}
             />
           )}
         </section>
@@ -1484,6 +1495,7 @@ export function GameDashboard() {
           addSession={session => addSession(selectedGame, session)}
           deleteSession={sessionId => deleteSession(selectedGame, sessionId)}
           quickUpdate={(changes, message) => quickUpdate(selectedGame, changes, message)}
+          share={() => shareGameInCommunity(selectedGame)}
         />
       )}
 

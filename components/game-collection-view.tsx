@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Share2,
   Target,
   Trash2,
   Trophy,
@@ -41,6 +42,7 @@ export type CollectionViewProps = {
   advance: (game: Game) => void;
   finish: (game: Game) => void;
   favorite: (game: Game) => void;
+  share: (game: Game) => void;
 };
 
 export function ViewSwitcher({
@@ -91,6 +93,7 @@ export function GameCard({
   advance,
   finish,
   favorite,
+  share,
 }: {
   game: Game;
   settings: AppSettings;
@@ -101,6 +104,7 @@ export function GameCard({
   advance: () => void;
   finish: () => void;
   favorite: () => void;
+  share: () => void;
 }) {
   return (
     <article className="group overflow-hidden rounded-3xl border border-white/8 bg-gradient-to-b from-white/[.065] to-white/[.025] transition hover:-translate-y-1 hover:border-violet-400/30">
@@ -186,6 +190,10 @@ export function GameCard({
                       ? "Quitar de favoritos"
                       : "Añadir a favoritos"}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={share}>
+                    <Share2 />
+                    Publicar en Comunidad
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={edit}>
                     <Pencil />
                     Editar
@@ -253,10 +261,16 @@ export function GameCard({
             <Clock3 className="size-4" />
             {game.hours} h
           </span>
-          <Button variant="ghost" size="sm" className="-mr-2 text-violet-300" onClick={view}>
-            Ver ficha
-            <ChevronRight />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="text-cyan-300" onClick={share}>
+              <Share2 />
+              Compartir
+            </Button>
+            <Button variant="ghost" size="sm" className="-mr-2 text-violet-300" onClick={view}>
+              Ver ficha
+              <ChevronRight />
+            </Button>
+          </div>
         </div>
       </div>
     </article>
@@ -273,6 +287,7 @@ export function GameActionMenu({
   advance,
   finish,
   favorite,
+  share,
 }: { game: Game } & Omit<CollectionViewProps, "games" | "mode">) {
   return (
     <DropdownMenu>
@@ -307,6 +322,10 @@ export function GameActionMenu({
           <Heart />
           {(game.lists ?? []).includes("Favoritos") ? "Quitar de favoritos" : "Añadir a favoritos"}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => share(game)}>
+          <Share2 />
+          Publicar en Comunidad
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => edit(game)}>
           <Pencil />
           Editar
@@ -330,6 +349,7 @@ export function GameListRow({
   advance,
   finish,
   favorite,
+  share,
   compact,
 }: { game: Game; compact?: boolean } & Omit<CollectionViewProps, "games" | "mode">) {
   return (
@@ -401,6 +421,7 @@ export function GameListRow({
           advance={advance}
           finish={finish}
           favorite={favorite}
+          share={share}
         />
       </div>
     </article>
@@ -417,6 +438,7 @@ export function GameCoverTile({
   advance,
   finish,
   favorite,
+  share,
 }: { game: Game } & Omit<CollectionViewProps, "games" | "mode">) {
   return (
     <article className="group relative overflow-hidden rounded-2xl border border-white/8 bg-white/[.035]">
@@ -463,6 +485,7 @@ export function GameCoverTile({
           advance={advance}
           finish={finish}
           favorite={favorite}
+          share={share}
         />
       </div>
     </article>
@@ -493,6 +516,7 @@ export function GameCollectionView(props: CollectionViewProps) {
             advance={() => props.advance(game)}
             finish={() => props.finish(game)}
             favorite={() => props.favorite(game)}
+            share={() => props.share(game)}
           />
         ))}
       </div>

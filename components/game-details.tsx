@@ -13,6 +13,7 @@ import {
   Pencil,
   Play,
   Save,
+  Share2,
   Square,
   Star,
   Target,
@@ -45,6 +46,7 @@ interface GameDetailsProps {
   addSession: (session: Omit<Session, "id">) => Promise<void>;
   deleteSession?: (sessionId: string) => Promise<void>;
   quickUpdate?: (changes: Partial<Game>, message: string) => Promise<void>;
+  share: () => void;
 }
 
 const difficultyList = ["Sin indicar", "Fácil", "Normal", "Difícil", "Muy difícil"] as const;
@@ -77,6 +79,7 @@ export function GameDetails({
   addSession,
   deleteSession,
   quickUpdate,
+  share,
 }: GameDetailsProps) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [hours, setHours] = useState("");
@@ -844,6 +847,14 @@ export function GameDetails({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cerrar
           </Button>
+          <Button
+            variant="outline"
+            onClick={share}
+            className="border-cyan-400/30 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-400/20"
+          >
+            <Share2 className="size-3.5 mr-1" />
+            Publicar en Comunidad
+          </Button>
           <Button className="bg-violet-600 hover:bg-violet-700" onClick={edit}>
             <Pencil className="size-3.5 mr-1" />
             Editar ficha completa
@@ -873,4 +884,3 @@ function Detail({
     </div>
   );
 }
-
