@@ -74,6 +74,7 @@ interface PublicProfileViewProps {
   initialData?: PublicProfileData | null;
   isOwner?: boolean;
   onExitPreview?: () => void;
+  onOpenProfilesDialog?: () => void;
 }
 
 export function PublicProfileView({
@@ -82,6 +83,7 @@ export function PublicProfileView({
   initialData,
   isOwner = false,
   onExitPreview,
+  onOpenProfilesDialog,
 }: PublicProfileViewProps) {
   const [fetchedProfile, setFetchedProfile] = useState<PublicProfileData | null>(null);
   const [loading, setLoading] = useState(() => !initialData && Boolean(db && userId));
@@ -267,6 +269,12 @@ export function PublicProfileView({
               <ShieldCheck className="mr-1.5 size-3.5" />
               Perfil de solo lectura
             </Badge>
+            {onOpenProfilesDialog && (
+              <Button variant="ghost" size="sm" className="text-slate-300 hover:text-white" onClick={onOpenProfilesDialog}>
+                <Globe className="mr-1.5 size-4 text-cyan-300" />
+                <span className="hidden sm:inline">Ver otros perfiles</span>
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={copyCurrentLink} title="Copiar enlace">
               <Copy className="size-4" />
               <span className="hidden sm:inline">Compartir</span>
