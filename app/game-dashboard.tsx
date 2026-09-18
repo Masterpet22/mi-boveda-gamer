@@ -70,6 +70,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ShareDialog } from "@/components/share-dialog";
 import { ProfilesDialog } from "@/components/profiles-dialog";
 import { PublicProfileView } from "@/components/public-profile-view";
+import { CommunityView } from "@/components/community-view";
 import { CatalogDialog } from "@/components/catalog-dialog";
 import { GameDialog } from "@/components/game-dialog";
 import { GameDetails } from "@/components/game-details";
@@ -146,6 +147,7 @@ export function GameDashboard() {
   const [importing, setImporting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [profilesDialogOpen, setProfilesDialogOpen] = useState(false);
+  const [currentNavTab, setCurrentNavTab] = useState<"library" | "community">("library");
   const [publicProfileSettings, setPublicProfileSettings] = useState<PublicProfileSettings>(
     defaultProfileSettings
   );
@@ -854,9 +856,25 @@ export function GameDashboard() {
     );
   }
   if (!user) {
+    if (currentNavTab === "community") {
+      return (
+        <CommunityView
+          db={db}
+          currentUserId={null}
+          currentUserName="Invitado"
+          currentUserPhoto={null}
+          onViewProfile={targetUid => setPublicViewUid(targetUid)}
+          onBackToLibrary={() => setCurrentNavTab("library")}
+        />
+      );
+    }
     return (
       <>
-        <SignIn onSignIn={login} signingIn={signingIn} onOpenProfiles={() => setProfilesDialogOpen(true)} />
+        <SignIn
+          onSignIn={login}
+          signingIn={signingIn}
+          onOpenProfiles={() => setCurrentNavTab("community")}
+        />
         <ProfilesDialog
           open={profilesDialogOpen}
           setOpen={setProfilesDialogOpen}
@@ -896,25 +914,35 @@ export function GameDashboard() {
             aria-label="Navegación principal"
             className="order-3 flex w-full gap-1 rounded-xl bg-white/[.04] p-1 md:order-none md:ml-5 md:w-auto"
           >
-            <Button variant="ghost" className="flex-1 bg-white/8 text-white md:flex-none">
-              <Library />
+            <Button
+              variant="ghost"
+              className={`flex-1 md:flex-none font-semibold ${
+                currentNavTab === "library" ? "bg-white/10 text-white shadow-sm" : "text-slate-300 hover:text-white"
+              }`}
+              onClick={() => setCurrentNavTab("library")}
+            >
+              <Library className="mr-1.5 size-4 text-violet-300" />
               Biblioteca
+            </Button>
+            <Button
+              variant="ghost"
+              className={`flex-1 md:flex-none font-semibold ${
+                currentNavTab === "community"
+                  ? "bg-gradient-to-r from-violet-600/30 to-cyan-500/30 text-cyan-200 border border-cyan-400/30 shadow-sm"
+                  : "text-slate-300 hover:text-white"
+              }`}
+              onClick={() => setCurrentNavTab("community")}
+            >
+              <Globe className="mr-1.5 size-4 text-cyan-300" />
+              Comunidad Gamer
             </Button>
             <Button
               variant="ghost"
               className="flex-1 text-slate-300 hover:text-white md:flex-none"
               onClick={() => setCatalogDialog(true)}
             >
-              <Compass />
+              <Compass className="mr-1.5 size-4 text-slate-400" />
               Descubrir juegos
-            </Button>
-            <Button
-              variant="ghost"
-              className="flex-1 text-slate-300 hover:text-white md:flex-none"
-              onClick={() => setProfilesDialogOpen(true)}
-            >
-              <Globe className="mr-1.5 size-4 text-cyan-300" />
-              Ver perfiles
             </Button>
           </nav>
 
@@ -976,9 +1004,9 @@ export function GameDashboard() {
                   <Eye />
                   Ver mi perfil público
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setProfilesDialogOpen(true)}>
+                <DropdownMenuItem onClick={() => setCurrentNavTab("community")}>
                   <Globe />
-                  Ver perfiles públicos
+                  Comunidad Gamer
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShareOpen(true)}>
                   <Share2 />
@@ -1033,18 +1061,30 @@ export function GameDashboard() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="mx-auto grid max-w-[1500px] gap-7 px-4 py-7 lg:grid-cols-[minmax(0,1fr)_310px] lg:px-8">
-        <section className="min-w-0">
-          {/* Header Stats */}
-          <div className="mb-7 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-cyan-300">Biblioteca personal</p>
-              <h1 className="text-3xl font-black tracking-[-.04em] sm:text-4xl">Mis juegos</h1>
-              <p className="mt-2 text-slate-400">
-                Consulta, organiza y continúa tus partidas desde un solo lugar.
-              </p>
-            </div>
+      {/* Main Content - Switch between Library and Community View */}
+      {currentNavTab === "community" ? (
+        <CommunityView
+          db={db}
+          currentUserId={user.uid}
+          currentUserName={profileName}
+          currentUserPhoto={user.photoURL}
+          publicProfileSettings={publicProfileSettings}
+          onOpenShareSettings={() => setShareOpen(true)}
+          onViewProfile={targetUid => setPublicViewUid(targetUid)}
+          onBackToLibrary={() => setCurrentNavTab("library")}
+        />
+      ) : (
+        <main className="mx-auto grid max-w-[1500px] gap-7 px-4 py-7 lg:grid-cols-[minmax(0,1fr)_310px] lg:px-8">
+          <section className="min-w-0">
+            {/* Header Stats */}
+            <div className="mb-7 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
+              <div>
+                <p className="mb-2 text-sm font-semibold text-cyan-300">Biblioteca personal</p>
+                <h1 className="text-3xl font-black tracking-[-.04em] sm:text-4xl">Mis juegos</h1>
+                <p className="mt-2 text-slate-400">
+                  Consulta, organiza y continúa tus partidas desde un solo lugar.
+                </p>
+              </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {statItems.map(({ Icon, label, value }) => (
                 <div
@@ -1376,6 +1416,7 @@ export function GameDashboard() {
           />
         </aside>
       </main>
+      )}
 
       <input
         ref={backupInput}

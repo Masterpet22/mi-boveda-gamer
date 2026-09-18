@@ -30,7 +30,7 @@ export function SignIn({ onSignIn, signingIn, onOpenProfiles }: SignInProps) {
         </Button>
         <div className="mt-6 border-t border-white/10 pt-6 text-center">
           <p className="text-xs text-slate-400">
-            ¿Quieres ver la colección compartida de un amigo o consultar un perfil?
+            ¿Quieres explorar las colecciones y debates de otros jugadores?
           </p>
           <Button
             variant="outline"
@@ -38,7 +38,7 @@ export function SignIn({ onSignIn, signingIn, onOpenProfiles }: SignInProps) {
             onClick={onOpenProfiles}
           >
             <Globe className="mr-2 size-4 text-cyan-300" />
-            Ver perfiles públicos
+            Explorar Comunidad Gamer
           </Button>
         </div>
       </div>

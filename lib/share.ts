@@ -1,4 +1,41 @@
-import { doc, getDoc, setDoc, serverTimestamp, type Firestore } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit as firestoreLimit,
+  orderBy,
+  query as firestoreQuery,
+  setDoc,
+  addDoc,
+  serverTimestamp,
+  type Firestore,
+} from "firebase/firestore";
+
+export interface CommunityReply {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto?: string;
+  title: string;
+  content: string;
+  category: "Pregunta" | "Recomendación" | "Debate" | "Logro";
+  gameTitle?: string;
+  platform?: string;
+  createdAt: string;
+  likes: number;
+  likedBy?: string[];
+  replies: CommunityReply[];
+}
 
 export interface PublicProfileSettings {
   isPublic: boolean;
@@ -218,12 +255,91 @@ export async function fetchPublicProfileFromFirestore(
   }
 }
 
-export async function disablePublicProfileInFirestore(
+export async function fetchAllPublicProfiles(
   db: Firestore,
-  userId: string
-): Promise<void> {
-  const ref = doc(db, "publicProfiles", userId);
-  await setDoc(ref, { isPublic: false, updatedAt: new Date().toISOString() }, { merge: true });
+  maxResults = 24
+): Promise<PublicProfileData[]> {
+  try {
+    const profilesCol = collection(db, "publicProfiles");
+    const q = firestoreQuery(profilesCol, firestoreLimit(maxResults));
+    const snap = await getDocs(q);
+    return snap.docs
+      .map(d => d.data() as PublicProfileData)
+      .filter(p => p.isPublic && p.userId && p.handle);
+  } catch (err) {
+    console.error("Error fetching public profiles list:", err);
+    return [];
+  }
+}
+
+export async function fetchCommunityPosts(
+  db: Firestore,
+  maxResults = 30
+): Promise<CommunityPost[]> {
+  try {
+    const postsCol = collection(db, "communityPosts");
+    const q = firestoreQuery(postsCol, orderBy("createdAt", "desc"), firestoreLimit(maxResults));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ ...d.data(), id: d.id } as CommunityPost));
+  } catch (err) {
+    console.warn("Error fetching community posts (might need index or fallback):", err);
+    try {
+      const snap = await getDocs(collection(db, "communityPosts"));
+      return snap.docs
+        .map(d => ({ ...d.data(), id: d.id } as CommunityPost))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    } catch {
+      return [];
+    }
+  }
+}
+
+export async function createCommunityPost(
+  db: Firestore,
+  post: Omit<CommunityPost, "id" | "likes" | "likedBy" | "replies" | "createdAt">
+): Promise<CommunityPost> {
+  const newPost = {
+    ...post,
+    likes: 0,
+    likedBy: [],
+    replies: [],
+    createdAt: new Date().toISOString(),
+    timestamp: serverTimestamp(),
+  };
+  const ref = await addDoc(collection(db, "communityPosts"), newPost);
+  return { ...newPost, id: ref.id } as CommunityPost;
+}
+
+export async function addCommunityReply(
+  db: Firestore,
+  postId: string,
+  currentReplies: CommunityReply[],
+  reply: Omit<CommunityReply, "id" | "createdAt">
+): Promise<CommunityReply> {
+  const newReply: CommunityReply = {
+    ...reply,
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+  const updatedReplies = [...currentReplies, newReply];
+  const ref = doc(db, "communityPosts", postId);
+  await setDoc(ref, { replies: updatedReplies }, { merge: true });
+  return newReply;
+}
+
+export async function togglePostLike(
+  db: Firestore,
+  postId: string,
+  userId: string,
+  currentLikes: number,
+  likedBy: string[] = []
+): Promise<{ likes: number; likedBy: string[] }> {
+  const hasLiked = likedBy.includes(userId);
+  const nextLikedBy = hasLiked ? likedBy.filter(id => id !== userId) : [...likedBy, userId];
+  const nextLikes = hasLiked ? Math.max(0, currentLikes - 1) : currentLikes + 1;
+  const ref = doc(db, "communityPosts", postId);
+  await setDoc(ref, { likes: nextLikes, likedBy: nextLikedBy }, { merge: true });
+  return { likes: nextLikes, likedBy: nextLikedBy };
 }
 
 export function generateLibrarySummaryMarkdown(
