@@ -33,7 +33,9 @@ export function GameDashboard(){
   useEffect(()=>{
     if(!auth||!db){setLoading(false);setAuthReady(true);return}
     const authClient=auth, store=db;
-    return onAuthStateChanged(authClient,async current=>{setUser(current);setAuthReady(true);if(!current){setGames([]);setLoading(false);return}setLoading(true);try{const snapshot=await getDocs(firestoreQuery(collection(store,"users",current.uid,"games"),orderBy("updatedAt","desc")));setGames(snapshot.docs.map(item=>{const data=item.data() as Omit<Game,"id"|"updatedAt">&{updatedAt?:{toDate?:()=>Date}|string};const updated=data.updatedAt;return {...data,id:item.id,updatedAt:typeof updated==="string"?updated:updated?.toDate?.().toISOString()??new Date().toISOString()} as Game}))}catch(error){console.error(error);toast.error("No pudimos cargar tu biblioteca.")}finally{setLoading(false)}})
+    let fallback=window.setTimeout(()=>{setUser(authClient.currentUser);setAuthReady(true);setLoading(false)},4000);
+    const unsubscribe=onAuthStateChanged(authClient,async current=>{window.clearTimeout(fallback);setUser(current);setAuthReady(true);if(!current){setGames([]);setLoading(false);return}setLoading(true);try{const snapshot=await getDocs(firestoreQuery(collection(store,"users",current.uid,"games"),orderBy("updatedAt","desc")));setGames(snapshot.docs.map(item=>{const data=item.data() as Omit<Game,"id"|"updatedAt">&{updatedAt?:{toDate?:()=>Date}|string};const updated=data.updatedAt;return {...data,id:item.id,updatedAt:typeof updated==="string"?updated:updated?.toDate?.().toISOString()??new Date().toISOString()} as Game}))}catch(error){console.error(error);toast.error("No pudimos cargar tu biblioteca.")}finally{setLoading(false)}});
+    return()=>{window.clearTimeout(fallback);unsubscribe()}
   },[]);
   useEffect(()=>{
     const context=(document as unknown as {modelContext?:{registerTool:(tool:unknown,options?:{signal:AbortSignal})=>void}}).modelContext;
