@@ -29,12 +29,14 @@ function createFirestore(): Firestore | null {
   try {
     return initializeFirestore(firebaseApp, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      ignoreUndefinedProperties: true,
     });
   } catch (error) {
     console.warn("Persistent cache unavailable for Firestore, attempting memory cache fallback:", error);
     try {
       return initializeFirestore(firebaseApp, {
         localCache: memoryLocalCache(),
+        ignoreUndefinedProperties: true,
       });
     } catch {
       return getFirestore(firebaseApp);
@@ -44,4 +46,3 @@ function createFirestore(): Firestore | null {
 
 export const db = createFirestore();
 export const googleProvider = new GoogleAuthProvider();
-

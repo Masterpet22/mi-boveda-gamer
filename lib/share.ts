@@ -309,8 +309,12 @@ export async function createCommunityPost(
   db: Firestore,
   post: Omit<CommunityPost, "id" | "likes" | "likedBy" | "replies" | "createdAt">
 ): Promise<CommunityPost> {
+  // Firestore rejects undefined values, including values nested in sharedGame.
+  // JSON-safe community data contains only strings, numbers, arrays and objects,
+  // so removing missing optional properties here is both safe and predictable.
+  const cleanPost = JSON.parse(JSON.stringify(post)) as typeof post;
   const newPost = {
-    ...post,
+    ...cleanPost,
     likes: 0,
     likedBy: [],
     replies: [],

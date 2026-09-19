@@ -905,17 +905,17 @@ export function GameDashboard() {
     .toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[#07101f] text-slate-100">
+    <div className="min-h-screen overflow-x-clip bg-[#07101f] text-slate-100">
       <Toaster position="top-right" richColors />
 
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-white/8 bg-[#07101f]/95 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 py-3 lg:px-8">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-[0_0_28px_rgba(139,92,246,.3)]">
               <Gamepad2 className="size-5" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <div className="font-black tracking-tight">MI BÓVEDA</div>
               <div className="-mt-1 text-[10px] font-bold tracking-[.22em] text-cyan-300">GAMER</div>
             </div>
@@ -923,11 +923,11 @@ export function GameDashboard() {
 
           <nav
             aria-label="Navegación principal"
-            className="order-3 flex w-full gap-1 rounded-xl bg-white/[.04] p-1 md:order-none md:ml-5 md:w-auto"
+            className="scrollbar-none order-3 flex w-full gap-1 overflow-x-auto rounded-xl bg-white/[.04] p-1 md:order-none md:ml-5 md:w-auto"
           >
             <Button
               variant="ghost"
-              className={`flex-1 md:flex-none font-semibold ${
+              className={`shrink-0 flex-1 whitespace-nowrap px-3 font-semibold md:flex-none ${
                 currentNavTab === "community"
                   ? "bg-gradient-to-r from-violet-600/30 to-cyan-500/30 text-cyan-200 border border-cyan-400/30 shadow-sm"
                   : "text-slate-300 hover:text-white"
@@ -939,7 +939,7 @@ export function GameDashboard() {
             </Button>
             <Button
               variant="ghost"
-              className={`flex-1 md:flex-none font-semibold ${
+              className={`shrink-0 flex-1 whitespace-nowrap px-3 font-semibold md:flex-none ${
                 currentNavTab === "library" ? "bg-white/10 text-white shadow-sm" : "text-slate-300 hover:text-white"
               }`}
               onClick={() => setCurrentNavTab("library")}
@@ -949,7 +949,7 @@ export function GameDashboard() {
             </Button>
             <Button
               variant="ghost"
-              className="flex-1 text-slate-300 hover:text-white md:flex-none"
+              className="shrink-0 flex-1 whitespace-nowrap px-3 text-slate-300 hover:text-white md:flex-none"
               onClick={() => setCatalogDialog(true)}
             >
               <Compass className="mr-1.5 size-4 text-slate-400" />
@@ -957,7 +957,7 @@ export function GameDashboard() {
             </Button>
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
             <Button
               variant="outline"
               className="border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
@@ -965,7 +965,7 @@ export function GameDashboard() {
               title="Compartir colección"
             >
               <Share2 className="mr-1.5 size-4 text-cyan-300" />
-              <span>Compartir</span>
+              <span className="hidden sm:inline">Compartir</span>
             </Button>
             <Button
               className="bg-violet-500 text-white hover:bg-violet-400"
