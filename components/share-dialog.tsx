@@ -70,7 +70,8 @@ export function ShareDialog({
     ...defaultProfileSettings,
     handle: savedSettings?.handle || defaultHandle,
     bio: savedSettings?.bio || defaultProfileSettings.bio,
-    isPublic: savedSettings?.isPublic ?? false,
+    isPublic: savedSettings?.isPublic ?? true,
+    visibilityExplicit: savedSettings?.visibilityExplicit ?? false,
     hideNotes: savedSettings?.hideNotes ?? true,
     hideSessions: savedSettings?.hideSessions ?? true,
     hideHours: savedSettings?.hideHours ?? false,
@@ -149,7 +150,7 @@ export function ShareDialog({
   }
 
   function handleTogglePublic(checked: boolean) {
-    const next = { ...settings, isPublic: checked };
+    const next = { ...settings, isPublic: checked, visibilityExplicit: true };
     setSettings(next);
     void handleSaveAndPublish(next);
   }

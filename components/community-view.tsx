@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Firestore } from "firebase/firestore";
-import { Archive, Camera, Flame, Gamepad2, Globe2, Heart, ImageIcon, Library, MessageCircle, Plus, Search, Send, Share2, Sparkles, Trophy, Users, X } from "lucide-react";
+import { Archive, Camera, Check, Flame, Gamepad2, Globe2, Heart, ImageIcon, Library, MessageCircle, Plus, Search, Send, Share2, Sparkles, Trophy, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { Game } from "@/lib/game-types";
-import { addCommunityReply, createCommunityPost, fetchAllPublicProfiles, fetchCommunityPosts, togglePostLike, type CommunityPost, type PublicProfileData, type PublicProfileSettings } from "@/lib/share";
+import { acceptFriendRequest, addCommunityReply, createCommunityPost, fetchAllPublicProfiles, fetchCommunityPosts, fetchFriendships, removeFriendship, sendFriendRequest, togglePostLike, type CommunityPost, type Friendship, type PublicProfileData, type PublicProfileSettings } from "@/lib/share";
 
 interface CommunityViewProps {
   db: Firestore | null;
@@ -27,7 +27,7 @@ interface CommunityViewProps {
   onBackToLibrary: () => void;
 }
 
-type FeedFilter = "all" | "questions" | "milestones" | "profiles";
+type FeedFilter = "all" | "questions" | "milestones" | "profiles" | "friends";
 type ActivityEvent = { id: string; userId: string; handle: string; gameTitle: string; platform: string; date: string; progress: number };
 type FeedItem = { kind: "post"; date: string; item: CommunityPost } | { kind: "activity"; date: string; item: ActivityEvent };
 
@@ -94,9 +94,11 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
   const [processingImage, setProcessingImage] = useState(false);
   const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [friendships, setFriendships] = useState<Friendship[]>([]);
+  const [friendshipsLoading, setFriendshipsLoading] = useState(Boolean(db && currentUserId));
 
   useEffect(() => {
-    if (!db) { setLoadingPosts(false); setLoadingProfiles(false); return; }
+    if (!db) return;
     let mounted = true;
     void Promise.allSettled([fetchCommunityPosts(db), fetchAllPublicProfiles(db)]).then(results => {
       if (!mounted) return;
@@ -109,11 +111,26 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
   }, [db]);
 
   useEffect(() => {
+    if (!db || !currentUserId) return;
+    let mounted = true;
+    void fetchFriendships(db, currentUserId)
+      .then(items => { if (mounted) setFriendships(items); })
+      .catch(() => toast.error("No pudimos cargar tus amistades."))
+      .finally(() => { if (mounted) setFriendshipsLoading(false); });
+    return () => { mounted = false; };
+  }, [db, currentUserId]);
+
+  useEffect(() => {
     if (!gameToShare) return;
-    setSelectedGameId(gameToShare.id);
-    setCategory(["Terminado", "Completado"].includes(gameToShare.status) ? "Logro" : "Debate");
-    setComposerOpen(true);
-    onGameShareConsumed?.();
+    let mounted = true;
+    queueMicrotask(() => {
+      if (!mounted) return;
+      setSelectedGameId(gameToShare.id);
+      setCategory(["Terminado", "Completado"].includes(gameToShare.status) ? "Logro" : "Debate");
+      setComposerOpen(true);
+      onGameShareConsumed?.();
+    });
+    return () => { mounted = false; };
   }, [gameToShare, onGameShareConsumed]);
 
   const selectedGame = currentUserGames.find(game => game.id === selectedGameId);
@@ -133,6 +150,47 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
     profiles.forEach(profile => profile.games.forEach(game => counts.set(game.title, (counts.get(game.title) || 0) + 1)));
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
   }, [profiles]);
+  const relationshipByUser = useMemo(() => {
+    const map = new Map<string, Friendship>();
+    if (!currentUserId) return map;
+    friendships.forEach(friendship => {
+      const otherId = friendship.memberIds.find(id => id !== currentUserId);
+      if (otherId) map.set(otherId, friendship);
+    });
+    return map;
+  }, [friendships, currentUserId]);
+
+  async function requestFriend(profile: PublicProfileData) {
+    if (!db || !currentUserId) { toast.info("Inicia sesión para enviar solicitudes."); return; }
+    try {
+      const item = await sendFriendRequest(db, { id: currentUserId, name: currentUserName || "Gamer" }, { id: profile.userId, name: profile.handle });
+      setFriendships(previous => [...previous.filter(friendship => friendship.id !== item.id), item]);
+      toast.success(item.status === "accepted" ? `Ahora tú y ${profile.handle} son amigos.` : `Solicitud enviada a ${profile.handle}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("already-friends")) toast.info("Ya son amigos.");
+      else if (message.includes("request-pending")) toast.info("La solicitud ya está pendiente.");
+      else toast.error("No se pudo enviar la solicitud.");
+    }
+  }
+
+  async function accept(friendship: Friendship) {
+    if (!db || !currentUserId) return;
+    try {
+      const updated = await acceptFriendRequest(db, friendship, currentUserId);
+      setFriendships(previous => previous.map(item => item.id === updated.id ? updated : item));
+      toast.success("Solicitud aceptada.");
+    } catch { toast.error("No se pudo aceptar la solicitud."); }
+  }
+
+  async function remove(friendship: Friendship) {
+    if (!db) return;
+    try {
+      await removeFriendship(db, friendship.id);
+      setFriendships(previous => previous.filter(item => item.id !== friendship.id));
+      toast.success(friendship.status === "accepted" ? "Amistad eliminada." : "Solicitud descartada.");
+    } catch { toast.error("No se pudo actualizar la solicitud."); }
+  }
 
   function openComposer(nextCategory: CommunityPost["category"] = "Debate") {
     if (!currentUserId) { toast.info("Inicia sesión para publicar en la comunidad."); return; }
@@ -200,7 +258,7 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
   }
 
   const navItems: Array<{ id: FeedFilter; label: string; icon: typeof Globe2 }> = [
-    { id: "all", label: "Para ti", icon: Sparkles }, { id: "questions", label: "Preguntas", icon: MessageCircle }, { id: "milestones", label: "Logros", icon: Trophy }, { id: "profiles", label: "Jugadores", icon: Users },
+    { id: "all", label: "Para ti", icon: Sparkles }, { id: "questions", label: "Preguntas", icon: MessageCircle }, { id: "milestones", label: "Logros", icon: Trophy }, { id: "profiles", label: "Jugadores", icon: Users }, { id: "friends", label: "Amigos", icon: UserPlus },
   ];
 
   return (
@@ -221,7 +279,7 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
           </aside>
 
           <main className="min-w-0 space-y-4">
-            {filter !== "profiles" && <section className="overflow-hidden rounded-3xl border border-white/10 bg-[#0b1628] shadow-[0_18px_50px_rgba(0,0,0,.18)]">
+            {filter !== "profiles" && filter !== "friends" && <section className="overflow-hidden rounded-3xl border border-white/10 bg-[#0b1628] shadow-[0_18px_50px_rgba(0,0,0,.18)]">
               <div className="flex gap-2.5 p-3 sm:gap-3 sm:p-5">
                 <Avatar className="size-9 shrink-0 border border-white/15 sm:size-11"><AvatarImage src={currentUserPhoto || undefined} alt={currentUserName || "Gamer"} /><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold text-white">{initials(currentUserName)}</AvatarFallback></Avatar>
                 <div className="min-w-0 flex-1">{composerOpen ? <div className="space-y-3">
@@ -234,7 +292,7 @@ export function CommunityView({ db, currentUserId, currentUserName = "Gamer", cu
               </div>
               {!composerOpen && <div className="grid grid-cols-3 border-t border-white/8"><ComposerAction icon={Gamepad2} label="Juego" onClick={() => openComposer("Recomendación")} /><ComposerAction icon={ImageIcon} label="Captura" onClick={() => { if (!currentUserId) return openComposer(); screenshotInput.current?.click(); }} /><ComposerAction icon={Trophy} label="Logro" onClick={() => openComposer("Logro")} /></div>}
             </section>}
-            {filter === "profiles" ? <ProfilesExplorer profiles={visibleProfiles} loading={loadingProfiles} query={profileSearch} setQuery={setProfileSearch} currentUserId={currentUserId} onViewProfile={onViewProfile} /> : loadingPosts || loadingProfiles ? [1, 2, 3].map(item => <Skeleton key={item} className="h-56 rounded-3xl bg-white/5" />) : feed.length === 0 ? <section className="rounded-3xl border border-dashed border-white/12 px-6 py-14 text-center"><MessageCircle className="mx-auto size-9 text-slate-500" /><h2 className="mt-3 font-bold">Aquí puede empezar una buena conversación</h2><p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Comparte una partida o haz la primera pregunta.</p><Button className="mt-4 bg-violet-500 hover:bg-violet-400" onClick={() => openComposer()}><Plus />Crear publicación</Button></section> : feed.map(entry => entry.kind === "post" ? <PostCard key={`post-${entry.item.id}`} post={entry.item} currentUserId={currentUserId} activeReplyId={activeReplyId} replyDraft={replyDrafts[entry.item.id] || ""} currentUserName={currentUserName} currentUserPhoto={currentUserPhoto} onViewProfile={onViewProfile} onLike={() => void like(entry.item)} onShare={() => void sharePost(entry.item)} onToggleReplies={() => setActiveReplyId(activeReplyId === entry.item.id ? null : entry.item.id)} onReplyChange={value => setReplyDrafts(previous => ({ ...previous, [entry.item.id]: value }))} onReply={() => void reply(entry.item)} /> : <ActivityCard key={`activity-${entry.item.id}`} activity={entry.item} onViewProfile={onViewProfile} />)}
+            {filter === "profiles" ? <ProfilesExplorer profiles={visibleProfiles} loading={loadingProfiles} query={profileSearch} setQuery={setProfileSearch} currentUserId={currentUserId} relationships={relationshipByUser} onRequestFriend={profile => void requestFriend(profile)} onAccept={friendship => void accept(friendship)} onViewProfile={onViewProfile} /> : filter === "friends" ? <FriendsPanel friendships={friendships} loading={friendshipsLoading} currentUserId={currentUserId} onAccept={friendship => void accept(friendship)} onRemove={friendship => void remove(friendship)} onViewProfile={onViewProfile} /> : loadingPosts || loadingProfiles ? [1, 2, 3].map(item => <Skeleton key={item} className="h-56 rounded-3xl bg-white/5" />) : feed.length === 0 ? <section className="rounded-3xl border border-dashed border-white/12 px-6 py-14 text-center"><MessageCircle className="mx-auto size-9 text-slate-500" /><h2 className="mt-3 font-bold">Aquí puede empezar una buena conversación</h2><p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Comparte una partida o haz la primera pregunta.</p><Button className="mt-4 bg-violet-500 hover:bg-violet-400" onClick={() => openComposer()}><Plus />Crear publicación</Button></section> : feed.map(entry => entry.kind === "post" ? <PostCard key={`post-${entry.item.id}`} post={entry.item} currentUserId={currentUserId} activeReplyId={activeReplyId} replyDraft={replyDrafts[entry.item.id] || ""} currentUserName={currentUserName} currentUserPhoto={currentUserPhoto} onViewProfile={onViewProfile} onLike={() => void like(entry.item)} onShare={() => void sharePost(entry.item)} onToggleReplies={() => setActiveReplyId(activeReplyId === entry.item.id ? null : entry.item.id)} onReplyChange={value => setReplyDrafts(previous => ({ ...previous, [entry.item.id]: value }))} onReply={() => void reply(entry.item)} /> : <ActivityCard key={`activity-${entry.item.id}`} activity={entry.item} onViewProfile={onViewProfile} />)}
           </main>
 
           <aside className="sticky top-24 hidden space-y-4 xl:block">
@@ -268,6 +326,25 @@ function PostCard({ post, currentUserId, activeReplyId, replyDraft, currentUserN
 
 function ActivityCard({ activity, onViewProfile }: { activity: ActivityEvent; onViewProfile: (id: string) => void }) { return <article className="flex gap-4 rounded-3xl border border-white/8 bg-white/[.035] p-4"><div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-400/10 text-emerald-300"><Trophy className="size-5" /></div><div className="min-w-0 flex-1"><p className="text-sm leading-6 text-slate-300"><button type="button" onClick={() => onViewProfile(activity.userId)} className="font-bold text-white hover:text-cyan-300">{activity.handle}</button> avanzó en <strong className="text-white">{activity.gameTitle}</strong></p><p className="mt-1 text-xs text-slate-500">{activity.platform} · {activity.progress}% · {timeAgo(activity.date)}</p></div></article>; }
 
-function ProfilesExplorer({ profiles, loading, query, setQuery, currentUserId, onViewProfile }: { profiles: PublicProfileData[]; loading: boolean; query: string; setQuery: (value: string) => void; currentUserId?: string | null; onViewProfile: (id: string) => void }) {
-  return <section className="space-y-4"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar jugador, consola o biografía…" className="h-11 border-white/10 bg-[#0b1628] pl-10" /></div>{loading ? [1, 2, 3].map(item => <Skeleton key={item} className="h-36 rounded-3xl bg-white/5" />) : profiles.length === 0 ? <div className="rounded-3xl border border-dashed border-white/10 py-14 text-center"><Archive className="mx-auto size-9 text-slate-600" /><p className="mt-3 text-slate-400">No encontramos jugadores con esa búsqueda.</p></div> : <div className="grid gap-4 sm:grid-cols-2">{profiles.map(profile => <button key={profile.userId} type="button" onClick={() => onViewProfile(profile.userId)} className="rounded-3xl border border-white/10 bg-[#0b1628] p-5 text-left transition hover:-translate-y-0.5 hover:border-cyan-400/30"><div className="flex items-center gap-3"><Avatar className="size-12 border border-white/15"><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold">{initials(profile.handle)}</AvatarFallback></Avatar><span className="min-w-0"><span className="flex items-center gap-2 font-bold">{profile.handle}{profile.userId === currentUserId && <Badge variant="outline" className="border-cyan-400/20 text-cyan-300">Tú</Badge>}</span><span className="mt-0.5 block line-clamp-1 text-xs text-slate-500">{profile.bio || "Colección pública"}</span></span></div><div className="mt-4 grid grid-cols-3 rounded-2xl bg-white/[.035] p-3 text-center"><span><strong className="block">{profile.stats.total}</strong><small className="text-slate-500">juegos</small></span><span><strong className="block text-cyan-300">{profile.stats.active}</strong><small className="text-slate-500">jugando</small></span><span><strong className="block text-emerald-300">{profile.stats.done}</strong><small className="text-slate-500">terminados</small></span></div></button>)}</div>}</section>;
+function ProfilesExplorer({ profiles, loading, query, setQuery, currentUserId, relationships, onRequestFriend, onAccept, onViewProfile }: { profiles: PublicProfileData[]; loading: boolean; query: string; setQuery: (value: string) => void; currentUserId?: string | null; relationships: Map<string, Friendship>; onRequestFriend: (profile: PublicProfileData) => void; onAccept: (friendship: Friendship) => void; onViewProfile: (id: string) => void }) {
+  return <section className="space-y-4"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar jugador, consola o biografía…" className="h-11 border-white/10 bg-[#0b1628] pl-10" /></div>{loading ? [1, 2, 3].map(item => <Skeleton key={item} className="h-36 rounded-3xl bg-white/5" />) : profiles.length === 0 ? <div className="rounded-3xl border border-dashed border-white/10 py-14 text-center"><Archive className="mx-auto size-9 text-slate-600" /><p className="mt-3 text-slate-400">No encontramos jugadores con esa búsqueda.</p></div> : <div className="grid gap-4 sm:grid-cols-2">{profiles.map(profile => {
+    const relationship = relationships.get(profile.userId);
+    const isIncoming = relationship?.status === "pending" && relationship.recipientId === currentUserId;
+    return <article key={profile.userId} className="rounded-3xl border border-white/10 bg-[#0b1628] p-5 transition hover:-translate-y-0.5 hover:border-cyan-400/30"><button type="button" onClick={() => onViewProfile(profile.userId)} className="w-full text-left"><div className="flex items-center gap-3"><Avatar className="size-12 border border-white/15"><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold">{initials(profile.handle)}</AvatarFallback></Avatar><span className="min-w-0"><span className="flex items-center gap-2 font-bold">{profile.handle}{profile.userId === currentUserId && <Badge variant="outline" className="border-cyan-400/20 text-cyan-300">Tú</Badge>}</span><span className="mt-0.5 block line-clamp-1 text-xs text-slate-500">{profile.bio || "Colección pública"}</span></span></div><div className="mt-4 grid grid-cols-3 rounded-2xl bg-white/[.035] p-3 text-center"><span><strong className="block">{profile.stats.total}</strong><small className="text-slate-500">juegos</small></span><span><strong className="block text-cyan-300">{profile.stats.active}</strong><small className="text-slate-500">jugando</small></span><span><strong className="block text-emerald-300">{profile.stats.done}</strong><small className="text-slate-500">terminados</small></span></div></button>{profile.userId !== currentUserId && <Button type="button" size="sm" variant="outline" disabled={!currentUserId || relationship?.status === "accepted" || (relationship?.status === "pending" && !isIncoming)} onClick={() => isIncoming && relationship ? onAccept(relationship) : onRequestFriend(profile)} className="mt-3 w-full border-white/10">{relationship?.status === "accepted" ? <><Check />Amigos</> : isIncoming ? <><Check />Aceptar solicitud</> : relationship?.status === "pending" ? <><UserPlus />Solicitud enviada</> : <><UserPlus />Agregar amigo</>}</Button>}</article>;
+  })}</div>}</section>;
+}
+
+function FriendsPanel({ friendships, loading, currentUserId, onAccept, onRemove, onViewProfile }: { friendships: Friendship[]; loading: boolean; currentUserId?: string | null; onAccept: (friendship: Friendship) => void; onRemove: (friendship: Friendship) => void; onViewProfile: (id: string) => void }) {
+  if (!currentUserId) return <section className="rounded-3xl border border-dashed border-white/10 py-14 text-center"><Users className="mx-auto size-9 text-slate-600" /><h2 className="mt-3 font-bold">Inicia sesión para gestionar amistades</h2></section>;
+  if (loading) return <div className="space-y-3">{[1, 2, 3].map(item => <Skeleton key={item} className="h-24 rounded-3xl bg-white/5" />)}</div>;
+  const incoming = friendships.filter(item => item.status === "pending" && item.recipientId === currentUserId);
+  const outgoing = friendships.filter(item => item.status === "pending" && item.requesterId === currentUserId);
+  const accepted = friendships.filter(item => item.status === "accepted");
+  const group = (title: string, items: Friendship[]) => items.length > 0 && <section className="space-y-3"><h2 className="px-1 text-sm font-bold text-slate-300">{title} <Badge variant="outline" className="ml-1 border-white/10">{items.length}</Badge></h2>{items.map(item => {
+    const otherId = item.memberIds.find(id => id !== currentUserId) || "";
+    const otherName = item.requesterId === currentUserId ? item.recipientName : item.requesterName;
+    const canAccept = item.status === "pending" && item.recipientId === currentUserId;
+    return <article key={item.id} className="flex flex-wrap items-center gap-3 rounded-3xl border border-white/10 bg-[#0b1628] p-4"><button type="button" onClick={() => onViewProfile(otherId)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><Avatar className="size-11"><AvatarFallback className="bg-gradient-to-br from-violet-500 to-cyan-500 font-bold">{initials(otherName)}</AvatarFallback></Avatar><span className="min-w-0"><strong className="block truncate">{otherName}</strong><small className="text-slate-500">{item.status === "accepted" ? "Amigo" : canAccept ? "Quiere ser tu amigo" : "Solicitud enviada"}</small></span></button><div className="flex gap-2">{canAccept && <Button size="sm" onClick={() => onAccept(item)} className="bg-cyan-400 text-slate-950 hover:bg-cyan-300"><Check />Aceptar</Button>}<Button size="sm" variant="outline" onClick={() => onRemove(item)} className="border-white/10">{item.status === "accepted" ? <><UserMinus />Eliminar</> : <><X />{canAccept ? "Rechazar" : "Cancelar"}</>}</Button></div></article>;
+  })}</section>;
+  return <div className="space-y-6">{friendships.length === 0 && <section className="rounded-3xl border border-dashed border-white/10 py-14 text-center"><UserPlus className="mx-auto size-9 text-slate-600" /><h2 className="mt-3 font-bold">Aún no tienes solicitudes</h2><p className="mt-1 text-sm text-slate-400">Busca jugadores y envíales una solicitud de amistad.</p></section>}{group("Solicitudes recibidas", incoming)}{group("Mis amigos", accepted)}{group("Solicitudes enviadas", outgoing)}</div>;
 }
