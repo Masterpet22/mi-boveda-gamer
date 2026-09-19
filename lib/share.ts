@@ -8,7 +8,10 @@ import {
   query as firestoreQuery,
   setDoc,
   addDoc,
+  deleteDoc,
   serverTimestamp,
+  runTransaction,
+  where,
   type Firestore,
 } from "firebase/firestore";
 
@@ -50,6 +53,7 @@ export interface CommunityPost {
 
 export interface PublicProfileSettings {
   isPublic: boolean;
+  visibilityExplicit: boolean;
   handle: string;
   bio: string;
   hideNotes: boolean;
@@ -87,6 +91,7 @@ export interface PublicProfileData {
   handle: string;
   bio: string;
   isPublic: boolean;
+  visibilityExplicit?: boolean;
   updatedAt: string;
   settings: {
     hideNotes: boolean;
@@ -105,7 +110,8 @@ export interface PublicProfileData {
 }
 
 export const defaultProfileSettings: PublicProfileSettings = {
-  isPublic: false,
+  isPublic: true,
+  visibilityExplicit: false,
   handle: "Gamer",
   bio: "Mi colección de videojuegos y registro de partidas en Mi Bóveda Gamer.",
   hideNotes: true,
@@ -229,6 +235,7 @@ export async function savePublicProfileToFirestore(
     handle: settings.handle.trim() || "Gamer",
     bio: settings.bio.trim(),
     isPublic: settings.isPublic,
+    visibilityExplicit: settings.visibilityExplicit,
     updatedAt: new Date().toISOString(),
     settings: {
       hideNotes: settings.hideNotes,
@@ -272,7 +279,7 @@ export async function fetchAllPublicProfiles(
 ): Promise<PublicProfileData[]> {
   try {
     const profilesCol = collection(db, "publicProfiles");
-    const q = firestoreQuery(profilesCol, firestoreLimit(maxResults));
+    const q = firestoreQuery(profilesCol, where("isPublic", "==", true), firestoreLimit(maxResults));
     const snap = await getDocs(q);
     return snap.docs
       .map(d => d.data() as PublicProfileData)
@@ -281,6 +288,78 @@ export async function fetchAllPublicProfiles(
     console.error("Error fetching public profiles list:", err);
     return [];
   }
+}
+
+export type FriendshipStatus = "pending" | "accepted";
+
+export interface Friendship {
+  id: string;
+  memberIds: [string, string];
+  requesterId: string;
+  recipientId: string;
+  requesterName: string;
+  recipientName: string;
+  status: FriendshipStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function friendshipId(firstUserId: string, secondUserId: string) {
+  return [firstUserId, secondUserId].sort().join("__");
+}
+
+export async function fetchFriendships(db: Firestore, userId: string): Promise<Friendship[]> {
+  const q = firestoreQuery(collection(db, "friendships"), where("memberIds", "array-contains", userId));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(item => ({ ...item.data(), id: item.id } as Friendship));
+}
+
+export async function sendFriendRequest(
+  db: Firestore,
+  requester: { id: string; name: string },
+  recipient: { id: string; name: string }
+): Promise<Friendship> {
+  if (requester.id === recipient.id) throw new Error("same-user");
+  const id = friendshipId(requester.id, recipient.id);
+  const ref = doc(db, "friendships", id);
+  return runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(ref);
+    const now = new Date().toISOString();
+    if (snapshot.exists()) {
+      const current = { ...snapshot.data(), id } as Friendship;
+      if (current.status === "accepted") throw new Error("already-friends");
+      if (current.recipientId === requester.id) {
+        const accepted = { ...current, status: "accepted" as const, updatedAt: now };
+        transaction.update(ref, { status: "accepted", updatedAt: now, timestamp: serverTimestamp() });
+        return accepted;
+      }
+      throw new Error("request-pending");
+    }
+    const friendship: Friendship = {
+      id,
+      memberIds: [requester.id, recipient.id].sort() as [string, string],
+      requesterId: requester.id,
+      recipientId: recipient.id,
+      requesterName: requester.name.trim() || "Gamer",
+      recipientName: recipient.name.trim() || "Gamer",
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+    };
+    transaction.set(ref, { ...friendship, timestamp: serverTimestamp() });
+    return friendship;
+  });
+}
+
+export async function acceptFriendRequest(db: Firestore, friendship: Friendship, userId: string) {
+  if (friendship.recipientId !== userId || friendship.status !== "pending") throw new Error("not-recipient");
+  const updatedAt = new Date().toISOString();
+  await setDoc(doc(db, "friendships", friendship.id), { status: "accepted", updatedAt, timestamp: serverTimestamp() }, { merge: true });
+  return { ...friendship, status: "accepted" as const, updatedAt };
+}
+
+export async function removeFriendship(db: Firestore, friendshipIdValue: string) {
+  await deleteDoc(doc(db, "friendships", friendshipIdValue));
 }
 
 export async function fetchCommunityPosts(
