@@ -24,6 +24,7 @@ import {
 } from "firebase/firestore";
 import {
   BarChart3,
+  Bell,
   Check,
   ChevronDown,
   ChevronRight,
@@ -38,6 +39,7 @@ import {
   Library,
   ListFilter,
   LogOut,
+  LogIn,
   Plus,
   Search,
   Settings2,
@@ -121,6 +123,7 @@ export function GameDashboard() {
   const [authReady, setAuthReady] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [notificationNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState("Todos");
   const [platform, setPlatform] = useState("Todas");
@@ -445,6 +448,34 @@ export function GameDashboard() {
     () => platforms.map(p => ({ p, n: games.filter(g => g.platform === p).length })).filter(x => x.n).sort((a, b) => b.n - a.n),
     [games]
   );
+
+  const headerAlerts = useMemo(() => {
+    const cutoff = notificationNow - settings.inactivityDays * 24 * 60 * 60 * 1000;
+    const active = games.filter(game => game.status === "Jugando");
+    const alerts: Array<{ id: string; title: string; text: string; game?: Game }> = [];
+    if (active.length > goals.activeLimit) {
+      alerts.push({
+        id: "focus",
+        title: `${active.length} partidas activas`,
+        text: `Superaste tu límite personal de ${goals.activeLimit}.`,
+      });
+    }
+    active.forEach(game => {
+      const latest = (game.sessions ?? [])
+        .map(session => new Date(`${session.date}T12:00:00`).getTime())
+        .filter(Number.isFinite)
+        .sort((a, b) => b - a)[0] ?? new Date(game.updatedAt).getTime();
+      if (Number.isFinite(latest) && latest < cutoff) {
+        alerts.push({
+          id: game.id,
+          title: `Retoma ${game.title}`,
+          text: `Lleva más de ${settings.inactivityDays} días sin actividad registrada.`,
+          game,
+        });
+      }
+    });
+    return alerts.slice(0, 5);
+  }, [games, goals.activeLimit, notificationNow, settings.inactivityDays]);
 
   const openNew = () => {
     setEditing(null);
@@ -843,6 +874,19 @@ export function GameDashboard() {
           db={db}
           isOwner={user?.uid === publicViewUid}
           onOpenProfilesDialog={() => setProfilesDialogOpen(true)}
+          sessionControls={
+            user ? (
+              <div className="flex items-center gap-1">
+                <NotificationsMenu alerts={headerAlerts} onOpenGame={game => { setPublicViewUid(null); setCurrentNavTab("library"); setSelectedGame(game); }} />
+                <Button variant="outline" size="sm" onClick={() => void logout()} className="border-white/10">
+                  <LogOut className="size-4" />
+                  <span className="hidden sm:inline">Cerrar sesión</span>
+                </Button>
+              </div>
+            ) : (
+              <GuestSessionControls onSignIn={() => void login()} signingIn={signingIn} />
+            )
+          }
           onExitPreview={() => {
             setPublicViewUid(null);
             if (typeof window !== "undefined") {
@@ -880,6 +924,7 @@ export function GameDashboard() {
       return (
         <>
           <Toaster position="top-right" richColors />
+          <GuestSessionHeader onSignIn={() => void login()} signingIn={signingIn} />
           <CommunityView
             db={db}
             currentUserId={null}
@@ -970,6 +1015,13 @@ export function GameDashboard() {
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+            <NotificationsMenu
+              alerts={headerAlerts}
+              onOpenGame={game => {
+                setCurrentNavTab("library");
+                setSelectedGame(game);
+              }}
+            />
             <Button
               variant="outline"
               className="border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
@@ -1080,6 +1132,16 @@ export function GameDashboard() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => void logout()}
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+              className="text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
+            >
+              <LogOut className="size-4" />
+            </Button>
           </div>
         </div>
       </header>
@@ -1550,6 +1612,38 @@ export function GameDashboard() {
       />
     </div>
   );
+}
+
+function NotificationsMenu({ alerts, onOpenGame }: { alerts: Array<{ id: string; title: string; text: string; game?: Game }>; onOpenGame: (game: Game) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative" aria-label="Abrir notificaciones" title="Notificaciones">
+          <Bell className="size-5" />
+          {alerts.length > 0 && <span className="absolute right-1 top-1 grid min-w-4 place-items-center rounded-full bg-amber-400 px-1 text-[10px] font-black text-slate-950">{alerts.length}</span>}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80 border-white/10 bg-[#0b1628] p-2 text-slate-100">
+        <DropdownMenuLabel className="flex items-center gap-2"><Bell className="size-4 text-amber-300" />Notificaciones</DropdownMenuLabel>
+        <DropdownMenuSeparator className="bg-white/10" />
+        {alerts.length === 0 ? (
+          <p className="px-3 py-5 text-center text-sm text-slate-400">No tienes notificaciones pendientes.</p>
+        ) : alerts.map(alert => (
+          <DropdownMenuItem key={alert.id} onClick={() => alert.game && onOpenGame(alert.game)} className="items-start py-3">
+            <span><span className="block font-semibold">{alert.title}</span><span className="mt-0.5 block text-xs leading-5 text-slate-400">{alert.text}</span></span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function GuestSessionControls({ onSignIn, signingIn }: { onSignIn: () => void; signingIn: boolean }) {
+  return <div className="flex items-center gap-1"><Button variant="ghost" size="icon" onClick={() => toast.info("Inicia sesión para ver tus notificaciones.")} aria-label="Notificaciones"><Bell className="size-5" /></Button><Button size="sm" onClick={onSignIn} disabled={signingIn} className="bg-violet-500 text-white hover:bg-violet-400"><LogIn className="size-4" />{signingIn ? "Conectando…" : "Iniciar sesión"}</Button></div>;
+}
+
+function GuestSessionHeader({ onSignIn, signingIn }: { onSignIn: () => void; signingIn: boolean }) {
+  return <header className="sticky top-0 z-40 border-b border-white/8 bg-[#07101f]/95 text-slate-100 backdrop-blur-xl"><div className="mx-auto flex h-16 max-w-[1500px] items-center gap-3 px-3 sm:px-4 lg:px-8"><div className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400"><Gamepad2 className="size-5" /></div><div className="min-w-0 flex-1"><div className="font-black tracking-tight">MI BÓVEDA</div><div className="-mt-1 text-[10px] font-bold tracking-[.22em] text-cyan-300">GAMER</div></div><GuestSessionControls onSignIn={onSignIn} signingIn={signingIn} /></div></header>;
 }
 
 function FilterControl({ label, children }: { label: string; children: ReactNode }) {
