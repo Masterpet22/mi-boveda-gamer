@@ -207,8 +207,7 @@ export function GameDashboard() {
           console.warn("Retrying games fetch without orderBy:", orderError);
           snapshot = await getDocs(collection(store, "users", current.uid, "games"));
         }
-        setGames(
-          snapshot.docs.map(item => {
+        const loadedGames = snapshot.docs.map(item => {
             const data = item.data() as Partial<Omit<Game, "id" | "updatedAt">> & {
               updatedAt?: { toDate?: () => Date } | string;
             };
@@ -222,8 +221,8 @@ export function GameDashboard() {
                   ? updated
                   : updated?.toDate?.().toISOString() ?? new Date().toISOString(),
             } as Game;
-          })
-        );
+          });
+        setGames(loadedGames);
 
         const [goalsSnapshot, settingsSnapshot, pubSnap] = await Promise.all([
           getDoc(doc(store, "users", current.uid, "settings", "goals")).catch(() => null),
@@ -239,17 +238,30 @@ export function GameDashboard() {
         }
         if (pubSnap?.exists()) {
           const pubData = pubSnap.data() as PublicProfileData;
-          setPublicProfileSettings({
-            isPublic: pubData.isPublic ?? false,
+          const shouldMigrateToPublic = pubData.visibilityExplicit !== true;
+          const nextPublicSettings: PublicProfileSettings = {
+            isPublic: shouldMigrateToPublic ? true : (pubData.isPublic ?? true),
+            visibilityExplicit: true,
             handle: pubData.handle || current.displayName || "Gamer",
             bio: pubData.bio || defaultProfileSettings.bio,
             hideNotes: pubData.settings?.hideNotes ?? true,
             hideSessions: pubData.settings?.hideSessions ?? true,
             hideHours: pubData.settings?.hideHours ?? false,
             hideWishlist: pubData.settings?.hideWishlist ?? false,
-          });
+          };
+          setPublicProfileSettings(nextPublicSettings);
+          if (shouldMigrateToPublic) {
+            await savePublicProfileToFirestore(store, current.uid, nextPublicSettings, loadedGames);
+          }
         } else {
-          setPublicProfileSettings({ ...defaultProfileSettings, handle: current.displayName || "Gamer" });
+          const newProfileSettings: PublicProfileSettings = {
+            ...defaultProfileSettings,
+            isPublic: true,
+            visibilityExplicit: true,
+            handle: current.displayName || "Gamer",
+          };
+          setPublicProfileSettings(newProfileSettings);
+          await savePublicProfileToFirestore(store, current.uid, newProfileSettings, loadedGames);
         }
       } catch (error) {
         console.error("Error loading library:", error);
