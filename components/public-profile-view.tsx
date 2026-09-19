@@ -75,6 +75,7 @@ interface PublicProfileViewProps {
   isOwner?: boolean;
   onExitPreview?: () => void;
   onOpenProfilesDialog?: () => void;
+  sessionControls?: ReactNode;
 }
 
 export function PublicProfileView({
@@ -84,6 +85,7 @@ export function PublicProfileView({
   isOwner = false,
   onExitPreview,
   onOpenProfilesDialog,
+  sessionControls,
 }: PublicProfileViewProps) {
   const [fetchedProfile, setFetchedProfile] = useState<PublicProfileData | null>(null);
   const [loading, setLoading] = useState(() => !initialData && Boolean(db && userId));
@@ -232,6 +234,7 @@ export function PublicProfileView({
       {isOwner && (
         <div className="sticky top-0 z-40 flex items-center justify-between border-b border-cyan-500/30 bg-cyan-950/90 px-4 py-2 text-xs text-cyan-200 backdrop-blur">
           <div className="flex items-center gap-2">
+            {sessionControls}
             <Eye className="size-4 text-cyan-300" />
             <span>Estás viendo tu colección en modo visitante (solo lectura).</span>
           </div>
